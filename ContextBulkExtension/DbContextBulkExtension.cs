@@ -44,25 +44,18 @@ public static class DbContextBulkExtension
         if (entities.TryGetNonEnumeratedCount(out var count) && count == 0)
             return;
 
-        // Validate SQL Server provider
-        var providerName = context.Database.ProviderName;
-        if (providerName == null || !providerName.Contains("SqlServer", StringComparison.OrdinalIgnoreCase))
+        // Get connection and validate SQL Server
+        var dbConnection = context.Database.GetDbConnection();
+        if (dbConnection is not SqlConnection connection)
         {
             throw new InvalidOperationException(
-                $"BulkInsertAsync only supports SQL Server. Current provider: {providerName ?? "Unknown"}");
+                $"BulkInsertAsync only supports SQL Server. Current connection type: {dbConnection?.GetType().Name ?? "Unknown"}");
         }
 
         // Get metadata
         var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, options.KeepIdentity);
 
         var tableName = EntityMetadataHelper.GetTableName<T>(context);
-
-        // Get connection
-        var connection = context.Database.GetDbConnection() as SqlConnection;
-        if (connection == null)
-        {
-            throw new InvalidOperationException("Could not retrieve SqlConnection from DbContext.");
-        }
 
         // Ensure connection is open (let EF Core/ADO.NET manage connection lifecycle)
         if (connection.State != ConnectionState.Open)

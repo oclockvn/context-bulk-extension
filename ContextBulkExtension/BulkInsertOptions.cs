@@ -39,6 +39,7 @@ public class BulkInsertOptions
 
     /// <summary>
     /// Use table lock for better performance. Default is true.
+    /// Note: Set to false for memory-optimized tables (In-Memory OLTP).
     /// </summary>
     public bool UseTableLock { get; set; } = true;
 }
