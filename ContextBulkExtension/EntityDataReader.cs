@@ -1,0 +1,145 @@
+using System.Collections;
+using System.Data;
+using System.Data.Common;
+
+namespace ContextBulkExtension;
+
+/// <summary>
+/// Memory-efficient IDataReader implementation for streaming entities to SqlBulkCopy.
+/// </summary>
+internal class EntityDataReader<T> : DbDataReader where T : class
+{
+    private readonly IEnumerator<T> _enumerator;
+    private readonly List<ColumnMetadata> _columns;
+    private bool _disposed;
+
+    public EntityDataReader(IEnumerable<T> entities, List<ColumnMetadata> columns)
+    {
+        _enumerator = entities.GetEnumerator();
+        _columns = columns;
+    }
+
+    public override int FieldCount => _columns.Count;
+
+    public override bool HasRows => true;
+
+    public override bool IsClosed => _disposed;
+
+    public override int RecordsAffected => -1;
+
+    public override object this[int ordinal] => GetValue(ordinal);
+
+    public override object this[string name] => GetValue(GetOrdinal(name));
+
+    public override int Depth => 0;
+
+    public override bool Read()
+    {
+        return _enumerator.MoveNext();
+    }
+
+    public override object GetValue(int ordinal)
+    {
+        if (_enumerator.Current == null)
+            throw new InvalidOperationException("No current row");
+
+        var column = _columns[ordinal];
+        var value = column.PropertyInfo.GetValue(_enumerator.Current);
+
+        return value ?? DBNull.Value;
+    }
+
+    public override string GetName(int ordinal)
+    {
+        return _columns[ordinal].ColumnName;
+    }
+
+    public override int GetOrdinal(string name)
+    {
+        for (int i = 0; i < _columns.Count; i++)
+        {
+            if (_columns[i].ColumnName.Equals(name, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+        throw new IndexOutOfRangeException($"Column '{name}' not found");
+    }
+
+    public override string GetDataTypeName(int ordinal)
+    {
+        return _columns[ordinal].ClrType.Name;
+    }
+
+    public override Type GetFieldType(int ordinal)
+    {
+        return _columns[ordinal].ClrType;
+    }
+
+    public override bool IsDBNull(int ordinal)
+    {
+        var value = GetValue(ordinal);
+        return value == null || value == DBNull.Value;
+    }
+
+    public override bool GetBoolean(int ordinal) => (bool)GetValue(ordinal);
+    public override byte GetByte(int ordinal) => (byte)GetValue(ordinal);
+    public override char GetChar(int ordinal) => (char)GetValue(ordinal);
+    public override DateTime GetDateTime(int ordinal) => (DateTime)GetValue(ordinal);
+    public override decimal GetDecimal(int ordinal) => (decimal)GetValue(ordinal);
+    public override double GetDouble(int ordinal) => (double)GetValue(ordinal);
+    public override float GetFloat(int ordinal) => (float)GetValue(ordinal);
+    public override Guid GetGuid(int ordinal) => (Guid)GetValue(ordinal);
+    public override short GetInt16(int ordinal) => (short)GetValue(ordinal);
+    public override int GetInt32(int ordinal) => (int)GetValue(ordinal);
+    public override long GetInt64(int ordinal) => (long)GetValue(ordinal);
+    public override string GetString(int ordinal) => (string)GetValue(ordinal);
+
+    public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length)
+    {
+        throw new NotImplementedException();
+    }
+
+    public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length)
+    {
+        throw new NotImplementedException();
+    }
+
+    public override int GetValues(object[] values)
+    {
+        int count = Math.Min(values.Length, _columns.Count);
+        for (int i = 0; i < count; i++)
+        {
+            values[i] = GetValue(i);
+        }
+        return count;
+    }
+
+    public override bool NextResult() => false;
+
+    public override IEnumerator GetEnumerator()
+    {
+        throw new NotImplementedException();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (!_disposed)
+        {
+            if (disposing)
+            {
+                _enumerator?.Dispose();
+            }
+            _disposed = true;
+        }
+        base.Dispose(disposing);
+    }
+}
+
+/// <summary>
+/// Metadata for a column mapping.
+/// </summary>
+internal class ColumnMetadata
+{
+    public required string ColumnName { get; init; }
+    public required System.Reflection.PropertyInfo PropertyInfo { get; init; }
+    public required Type ClrType { get; init; }
+}

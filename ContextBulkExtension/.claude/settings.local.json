@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//e/projects/ContextBulkExtension/ContextBulkExtension/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
