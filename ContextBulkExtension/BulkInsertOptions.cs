@@ -13,9 +13,9 @@ public class BulkInsertOptions
     public int BatchSize { get; set; } = 10000;
 
     /// <summary>
-    /// Timeout in seconds for the bulk operation. Default is 30 seconds.
+    /// Timeout in seconds for the bulk operation. Default is 300 seconds (5 minutes).
     /// </summary>
-    public int TimeoutSeconds { get; set; } = 30;
+    public int TimeoutSeconds { get; set; } = 300;
 
     /// <summary>
     /// Preserve source identity values. Default is false.
