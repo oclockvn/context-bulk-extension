@@ -41,7 +41,7 @@ public static class DbContextBulkExtension
         ArgumentNullException.ThrowIfNull(options);
 
         // Early return for empty collections
-        if (!entities.Any())
+        if (entities.TryGetNonEnumeratedCount(out var count) && count == 0)
             return;
 
         // Validate SQL Server provider
