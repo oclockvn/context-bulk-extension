@@ -81,8 +81,9 @@ internal static class EntityMetadataHelper
 
             // Exclude identity columns from non-identity list
             bool isIdentity = property.ValueGenerated == ValueGenerated.OnAdd &&
-                             (property.GetValueGeneratorFactory() != null ||
-                              property.GetDefaultValueSql() != null);
+                             (property.GetDefaultValueSql()?.Contains("IDENTITY", StringComparison.OrdinalIgnoreCase) == true ||
+                              property.GetValueGeneratorFactory() != null ||
+                              (property.IsPrimaryKey() && (property.ClrType == typeof(int) || property.ClrType == typeof(long))));
 
             if (!isIdentity)
             {
