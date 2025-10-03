@@ -53,9 +53,7 @@ public static class DbContextBulkExtension
         }
 
         // Get metadata
-        var columns = options.KeepIdentity
-            ? EntityMetadataHelper.GetColumnMetadataWithIdentity<T>(context)
-            : EntityMetadataHelper.GetColumnMetadata<T>(context);
+        var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, options.KeepIdentity);
 
         var tableName = EntityMetadataHelper.GetTableName<T>(context);
 

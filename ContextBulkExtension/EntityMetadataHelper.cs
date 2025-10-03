@@ -11,7 +11,9 @@ internal static class EntityMetadataHelper
     /// <summary>
     /// Extracts column metadata for bulk insert operations.
     /// </summary>
-    public static List<ColumnMetadata> GetColumnMetadata<T>(DbContext context) where T : class
+    /// <param name="context">The DbContext instance</param>
+    /// <param name="includeIdentity">Whether to include identity columns. Default is false.</param>
+    public static List<ColumnMetadata> GetColumnMetadata<T>(DbContext context, bool includeIdentity = false) where T : class
     {
         var entityType = context.Model.FindEntityType(typeof(T));
         if (entityType == null)
@@ -25,7 +27,7 @@ internal static class EntityMetadataHelper
 
         foreach (var property in entityType.GetProperties())
         {
-            // Skip navigation properties
+            // Skip shadow properties that are not foreign keys
             if (property.IsShadowProperty() && !property.IsForeignKey())
                 continue;
 
@@ -33,12 +35,11 @@ internal static class EntityMetadataHelper
             if (property.GetComputedColumnSql() != null)
                 continue;
 
-            // Skip properties with AfterSaveBehavior (like computed or identity in some cases)
+            // Skip properties with AfterSaveBehavior
             if (property.ValueGenerated == ValueGenerated.OnAddOrUpdate ||
                 property.ValueGenerated == ValueGenerated.OnUpdate)
                 continue;
 
-            // Skip identity columns unless KeepIdentity is true (handled in BulkInsert)
             var clrProperty = property.PropertyInfo;
             if (clrProperty == null)
                 continue;
@@ -57,7 +58,7 @@ internal static class EntityMetadataHelper
             });
         }
 
-        if (columns.Count == 0)
+        if (!includeIdentity && columns.Count == 0)
         {
             throw new InvalidOperationException(
                 $"No valid columns found for entity type '{typeof(T).Name}'. " +
@@ -108,53 +109,4 @@ internal static class EntityMetadataHelper
                       p.GetDefaultValueSql() != null));
     }
 
-    /// <summary>
-    /// Gets column metadata including identity columns (for KeepIdentity scenarios).
-    /// </summary>
-    public static List<ColumnMetadata> GetColumnMetadataWithIdentity<T>(DbContext context) where T : class
-    {
-        var entityType = context.Model.FindEntityType(typeof(T));
-        if (entityType == null)
-        {
-            throw new InvalidOperationException(
-                $"Entity type '{typeof(T).Name}' is not part of the DbContext model.");
-        }
-
-        var columns = new List<ColumnMetadata>();
-
-        foreach (var property in entityType.GetProperties())
-        {
-            // Skip shadow properties that are not foreign keys
-            if (property.IsShadowProperty() && !property.IsForeignKey())
-                continue;
-
-            // Skip computed columns
-            if (property.GetComputedColumnSql() != null)
-                continue;
-
-            // Skip properties with AfterSaveBehavior
-            if (property.ValueGenerated == ValueGenerated.OnAddOrUpdate ||
-                property.ValueGenerated == ValueGenerated.OnUpdate)
-                continue;
-
-            var clrProperty = property.PropertyInfo;
-            if (clrProperty == null)
-                continue;
-
-            var columnName = property.GetColumnName();
-            if (string.IsNullOrEmpty(columnName))
-                continue;
-
-            var clrType = property.ClrType;
-
-            columns.Add(new ColumnMetadata
-            {
-                ColumnName = columnName,
-                PropertyInfo = clrProperty,
-                ClrType = Nullable.GetUnderlyingType(clrType) ?? clrType
-            });
-        }
-
-        return columns;
-    }
 }
