@@ -64,12 +64,10 @@ public static class DbContextBulkExtension
             throw new InvalidOperationException("Could not retrieve SqlConnection from DbContext.");
         }
 
-        // Ensure connection is open
-        bool shouldCloseConnection = false;
+        // Ensure connection is open (let EF Core/ADO.NET manage connection lifecycle)
         if (connection.State != ConnectionState.Open)
         {
             await connection.OpenAsync();
-            shouldCloseConnection = true;
         }
 
         try
@@ -121,13 +119,6 @@ public static class DbContextBulkExtension
             throw new InvalidOperationException(
                 $"Bulk insert failed for entity type '{typeof(T).Name}'. " +
                 $"Error: {ex.Message}", ex);
-        }
-        finally
-        {
-            if (shouldCloseConnection && connection.State == ConnectionState.Open)
-            {
-                await connection.CloseAsync();
-            }
         }
     }
 }

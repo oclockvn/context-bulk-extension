@@ -109,8 +109,8 @@ internal static class EntityMetadataHelper
         }
 
         var fullTableName = string.IsNullOrEmpty(schema)
-            ? $"[{tableName}]"
-            : $"[{schema}].[{tableName}]";
+            ? EscapeSqlIdentifier(tableName)
+            : $"{EscapeSqlIdentifier(schema)}.{EscapeSqlIdentifier(tableName)}";
 
         return new CachedEntityMetadata
         {
@@ -151,6 +151,18 @@ internal static class EntityMetadataHelper
     public static void ClearCache()
     {
         _cache.Clear();
+    }
+
+    /// <summary>
+    /// Escapes SQL Server identifiers by replacing ] with ]] and wrapping in brackets.
+    /// </summary>
+    private static string EscapeSqlIdentifier(string identifier)
+    {
+        if (string.IsNullOrEmpty(identifier))
+            throw new ArgumentException("SQL identifier cannot be null or empty.", nameof(identifier));
+
+        // Replace ] with ]] (SQL Server escape sequence for brackets)
+        return $"[{identifier.Replace("]", "]]")}]";
     }
 
     /// <summary>
