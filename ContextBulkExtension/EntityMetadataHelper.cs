@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using System.Collections.Concurrent;
+using System.Linq.Expressions;
 
 namespace ContextBulkExtension;
 
@@ -65,11 +66,15 @@ internal static class EntityMetadataHelper
 
             var clrType = property.ClrType;
 
+            // Compile expression delegate for fast property access
+            var compiledGetter = CompilePropertyGetter<T>(property, clrProperty);
+
             var columnMetadata = new ColumnMetadata
             {
                 ColumnName = columnName,
                 PropertyInfo = clrProperty,
-                ClrType = Nullable.GetUnderlyingType(clrType) ?? clrType
+                ClrType = Nullable.GetUnderlyingType(clrType) ?? clrType,
+                CompiledGetter = compiledGetter
             };
 
             allColumns.Add(columnMetadata);
@@ -145,6 +150,88 @@ internal static class EntityMetadataHelper
     public static void ClearCache()
     {
         _cache.Clear();
+    }
+
+    /// <summary>
+    /// Compiles a fast property getter with support for complex properties and value converters.
+    /// </summary>
+    private static Func<object, object?> CompilePropertyGetter<T>(IProperty property, System.Reflection.PropertyInfo clrProperty) where T : class
+    {
+        var parameter = Expression.Parameter(typeof(object), "instance");
+        Expression propertyAccess;
+
+        // Check if this is a complex property (EF Core 8+)
+        var complexProperty = property.DeclaringType as IComplexType;
+
+        if (complexProperty != null)
+        {
+            // Handle nested complex property access: instance.ComplexProp.Property
+            var complexPropInfo = complexProperty.ComplexProperty.PropertyInfo;
+            if (complexPropInfo == null)
+            {
+                throw new InvalidOperationException($"Complex property '{complexProperty.ComplexProperty.Name}' has no PropertyInfo.");
+            }
+
+            var complexPropDeclaringType = complexPropInfo.DeclaringType!;
+
+            // Cast instance to declaring type
+            var typedInstance = complexPropDeclaringType.IsValueType
+                ? Expression.Unbox(parameter, complexPropDeclaringType)
+                : Expression.Convert(parameter, complexPropDeclaringType);
+
+            // Access complex property: instance.ComplexProp
+            var complexAccess = Expression.Property(typedInstance, complexPropInfo);
+
+            // Access nested property: instance.ComplexProp.Property
+            propertyAccess = Expression.Property(complexAccess, clrProperty);
+        }
+        else
+        {
+            // Simple property access: instance.Property
+            var declaringType = clrProperty.DeclaringType!;
+
+            // Use Unbox for value types, Convert for reference types
+            var typedInstance = typeof(T).IsValueType
+                ? Expression.Unbox(parameter, typeof(T))
+                : Expression.Convert(parameter, typeof(T));
+
+            propertyAccess = Expression.Property(typedInstance, clrProperty);
+        }
+
+        // Apply EF Core value converter if exists
+        var converter = property.GetValueConverter();
+        if (converter != null)
+        {
+            // Get the converter's ConvertToProvider method
+            var convertMethod = converter.GetType().GetMethod("ConvertToProvider",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+
+            if (convertMethod != null)
+            {
+                var converterConstant = Expression.Constant(converter);
+                Expression converterInput = propertyAccess;
+
+                // Handle null for reference types
+                if (propertyAccess.Type.IsClass)
+                {
+                    var nullCheck = Expression.Equal(propertyAccess, Expression.Constant(null, propertyAccess.Type));
+                    var convertedValue = Expression.Call(converterConstant, convertMethod, propertyAccess);
+                    var nullResult = Expression.Constant(null, convertedValue.Type);
+                    propertyAccess = Expression.Condition(nullCheck, nullResult, convertedValue);
+                }
+                else
+                {
+                    propertyAccess = Expression.Call(converterConstant, convertMethod, propertyAccess);
+                }
+            }
+        }
+
+        // Only box value types, reference types don't need conversion
+        var finalExpression = propertyAccess.Type.IsValueType
+            ? Expression.Convert(propertyAccess, typeof(object))
+            : (Expression)propertyAccess;
+
+        return Expression.Lambda<Func<object, object?>>(finalExpression, parameter).Compile();
     }
 
 }

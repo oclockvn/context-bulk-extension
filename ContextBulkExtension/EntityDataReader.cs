@@ -36,7 +36,7 @@ internal class EntityDataReader<T>(IEnumerable<T> entities, List<ColumnMetadata>
             throw new InvalidOperationException("No current row");
 
         var column = columns[ordinal];
-        var value = column.PropertyInfo.GetValue(_enumerator.Current);
+        var value = column.CompiledGetter(_enumerator.Current);
 
         return value ?? DBNull.Value;
     }
@@ -134,4 +134,5 @@ internal class ColumnMetadata
     public required string ColumnName { get; init; }
     public required System.Reflection.PropertyInfo PropertyInfo { get; init; }
     public required Type ClrType { get; init; }
+    public required Func<object, object?> CompiledGetter { get; init; }
 }
