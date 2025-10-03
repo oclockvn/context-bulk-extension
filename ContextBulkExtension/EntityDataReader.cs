@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Data;
 using System.Data.Common;
 
 namespace ContextBulkExtension;
@@ -7,19 +6,12 @@ namespace ContextBulkExtension;
 /// <summary>
 /// Memory-efficient IDataReader implementation for streaming entities to SqlBulkCopy.
 /// </summary>
-internal class EntityDataReader<T> : DbDataReader where T : class
+internal class EntityDataReader<T>(IEnumerable<T> entities, List<ColumnMetadata> columns) : DbDataReader where T : class
 {
-    private readonly IEnumerator<T> _enumerator;
-    private readonly List<ColumnMetadata> _columns;
+    private readonly IEnumerator<T> _enumerator = entities.GetEnumerator();
     private bool _disposed;
 
-    public EntityDataReader(IEnumerable<T> entities, List<ColumnMetadata> columns)
-    {
-        _enumerator = entities.GetEnumerator();
-        _columns = columns;
-    }
-
-    public override int FieldCount => _columns.Count;
+    public override int FieldCount => columns.Count;
 
     public override bool HasRows => true;
 
@@ -43,7 +35,7 @@ internal class EntityDataReader<T> : DbDataReader where T : class
         if (_enumerator.Current == null)
             throw new InvalidOperationException("No current row");
 
-        var column = _columns[ordinal];
+        var column = columns[ordinal];
         var value = column.PropertyInfo.GetValue(_enumerator.Current);
 
         return value ?? DBNull.Value;
@@ -51,14 +43,14 @@ internal class EntityDataReader<T> : DbDataReader where T : class
 
     public override string GetName(int ordinal)
     {
-        return _columns[ordinal].ColumnName;
+        return columns[ordinal].ColumnName;
     }
 
     public override int GetOrdinal(string name)
     {
-        for (int i = 0; i < _columns.Count; i++)
+        for (int i = 0; i < columns.Count; i++)
         {
-            if (_columns[i].ColumnName.Equals(name, StringComparison.OrdinalIgnoreCase))
+            if (columns[i].ColumnName.Equals(name, StringComparison.OrdinalIgnoreCase))
                 return i;
         }
         throw new IndexOutOfRangeException($"Column '{name}' not found");
@@ -66,12 +58,12 @@ internal class EntityDataReader<T> : DbDataReader where T : class
 
     public override string GetDataTypeName(int ordinal)
     {
-        return _columns[ordinal].ClrType.Name;
+        return columns[ordinal].ClrType.Name;
     }
 
     public override Type GetFieldType(int ordinal)
     {
-        return _columns[ordinal].ClrType;
+        return columns[ordinal].ClrType;
     }
 
     public override bool IsDBNull(int ordinal)
@@ -105,7 +97,7 @@ internal class EntityDataReader<T> : DbDataReader where T : class
 
     public override int GetValues(object[] values)
     {
-        int count = Math.Min(values.Length, _columns.Count);
+        int count = Math.Min(values.Length, columns.Count);
         for (int i = 0; i < count; i++)
         {
             values[i] = GetValue(i);
