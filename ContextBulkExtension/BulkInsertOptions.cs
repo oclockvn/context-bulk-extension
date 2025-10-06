@@ -18,11 +18,6 @@ public class BulkInsertOptions
     public int TimeoutSeconds { get; set; } = 300;
 
     /// <summary>
-    /// Preserve source identity values. Default is false.
-    /// </summary>
-    public bool KeepIdentity { get; set; } = false;
-
-    /// <summary>
     /// Check constraints during bulk insert. Default is true.
     /// </summary>
     public bool CheckConstraints { get; set; } = true;

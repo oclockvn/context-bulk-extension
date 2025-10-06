@@ -96,11 +96,8 @@ public static partial class DbContextBulkExtensionUpsert
 
             try
             {
-                // Step 2: Bulk insert to temp table
-                var bulkCopyOptions = SqlBulkCopyOptions.Default;
-
-                if (options.KeepIdentity)
-                    bulkCopyOptions |= SqlBulkCopyOptions.KeepIdentity;
+                // Step 2: Bulk insert to temp table (always with KeepIdentity for temp table)
+                var bulkCopyOptions = SqlBulkCopyOptions.KeepIdentity;
 
                 if (options.CheckConstraints)
                     bulkCopyOptions |= SqlBulkCopyOptions.CheckConstraints;
@@ -126,6 +123,7 @@ public static partial class DbContextBulkExtensionUpsert
 
                 // Step 3: Execute MERGE statement
                 var mergeSql = BuildMergeSql(tableName, tempTableName, columns, primaryKeyColumns, options);
+
                 using var mergeCmd = new SqlCommand(mergeSql, connection, sqlTransaction);
                 mergeCmd.CommandTimeout = options.TimeoutSeconds;
                 await mergeCmd.ExecuteNonQueryAsync();
@@ -232,10 +230,8 @@ public static partial class DbContextBulkExtensionUpsert
         }
 
         // WHEN NOT MATCHED clause (insert)
-        // When KeepIdentity = false, exclude identity columns from INSERT
-        var insertColumns = options.KeepIdentity
-            ? columns
-            : columns.Where(c => !c.IsIdentity).ToList();
+        // Always exclude identity columns from INSERT - let SQL Server auto-generate them
+        var insertColumns = columns.Where(c => !c.IsIdentity).ToList();
 
         sql.AppendLine("WHEN NOT MATCHED BY TARGET THEN");
         sql.Append("    INSERT (");

@@ -52,8 +52,8 @@ public static class DbContextBulkExtension
                 $"BulkInsertAsync only supports SQL Server. Current connection type: {dbConnection?.GetType().Name ?? "Unknown"}");
         }
 
-        // Get metadata
-        var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, options.KeepIdentity);
+        // Get metadata (always exclude identity columns - let SQL Server auto-generate them)
+        var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: false);
 
         var tableName = EntityMetadataHelper.GetTableName<T>(context);
 
@@ -76,9 +76,6 @@ public static class DbContextBulkExtension
 
             // Configure SqlBulkCopy
             var bulkCopyOptions = SqlBulkCopyOptions.Default;
-
-            if (options.KeepIdentity)
-                bulkCopyOptions |= SqlBulkCopyOptions.KeepIdentity;
 
             if (options.CheckConstraints)
                 bulkCopyOptions |= SqlBulkCopyOptions.CheckConstraints;
