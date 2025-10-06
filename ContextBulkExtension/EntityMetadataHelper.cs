@@ -11,19 +11,6 @@ namespace ContextBulkExtension;
 internal static class EntityMetadataHelper
 {
     private static readonly ConcurrentDictionary<(Type EntityType, Type ContextType), CachedEntityMetadata> _cache = new();
-    /// <summary>
-    /// Extracts column metadata for bulk insert operations.
-    /// </summary>
-    /// <param name="context">The DbContext instance</param>
-    /// <param name="includeIdentity">Whether to include identity columns. Default is false.</param>
-    public static List<ColumnMetadata> GetColumnMetadata<T>(DbContext context, bool includeIdentity = false) where T : class
-    {
-        var cacheKey = (typeof(T), context.GetType());
-
-        var cached = _cache.GetOrAdd(cacheKey, _ => BuildEntityMetadata<T>(context));
-
-        return includeIdentity ? cached.ColumnsWithIdentity : cached.Columns;
-    }
 
     /// <summary>
     /// Builds complete entity metadata including columns and table name.
@@ -39,7 +26,6 @@ internal static class EntityMetadataHelper
         }
 
         var allColumns = new List<ColumnMetadata>();
-        var columnsWithoutIdentity = new List<ColumnMetadata>();
 
         foreach (var property in entityType.GetProperties())
         {
@@ -69,29 +55,31 @@ internal static class EntityMetadataHelper
             // Compile expression delegate for fast property access
             var compiledGetter = CompilePropertyGetter<T>(property, clrProperty);
 
-            var columnMetadata = new ColumnMetadata
-            {
-                ColumnName = columnName,
-                PropertyInfo = clrProperty,
-                ClrType = Nullable.GetUnderlyingType(clrType) ?? clrType,
-                CompiledGetter = compiledGetter
-            };
+            // Determine if this is a primary key
+            bool isPrimaryKey = property.IsPrimaryKey();
 
-            allColumns.Add(columnMetadata);
-
-            // Exclude identity columns from non-identity list
+            // Determine if this is an identity column
             bool isIdentity = property.ValueGenerated == ValueGenerated.OnAdd &&
                              (property.GetDefaultValueSql()?.Contains("IDENTITY", StringComparison.OrdinalIgnoreCase) == true ||
                               property.GetValueGeneratorFactory() != null ||
-                              (property.IsPrimaryKey() && (property.ClrType == typeof(int) || property.ClrType == typeof(long))));
+                              (isPrimaryKey && (property.ClrType == typeof(int) || property.ClrType == typeof(long))));
 
-            if (!isIdentity)
+            var columnMetadata = new ColumnMetadata
             {
-                columnsWithoutIdentity.Add(columnMetadata);
-            }
+                ColumnName = columnName,
+                SqlType = property.GetColumnType(),
+                PropertyInfo = clrProperty,
+                ClrType = Nullable.GetUnderlyingType(clrType) ?? clrType,
+                CompiledGetter = compiledGetter,
+                IsIdentity = isIdentity,
+                IsPrimaryKey = isPrimaryKey
+            };
+
+            allColumns.Add(columnMetadata);
         }
 
-        if (columnsWithoutIdentity.Count == 0)
+        // Validate we have at least one non-identity column
+        if (!allColumns.Any(c => !c.IsIdentity))
         {
             throw new InvalidOperationException(
                 $"No valid columns found for entity type '{typeof(T).Name}'. " +
@@ -112,12 +100,24 @@ internal static class EntityMetadataHelper
             ? EscapeSqlIdentifier(tableName)
             : $"{EscapeSqlIdentifier(schema)}.{EscapeSqlIdentifier(tableName)}";
 
-        return new CachedEntityMetadata
+        return new CachedEntityMetadata(allColumns)
         {
-            Columns = columnsWithoutIdentity,
-            ColumnsWithIdentity = allColumns,
             TableName = fullTableName
         };
+    }
+
+    /// <summary>
+    /// Extracts column metadata for bulk insert operations.
+    /// </summary>
+    /// <param name="context">The DbContext instance</param>
+    /// <param name="includeIdentity">Whether to include identity columns. Default is false.</param>
+    public static IReadOnlyList<ColumnMetadata> GetColumnMetadata<T>(DbContext context, bool includeIdentity = false) where T : class
+    {
+        var cacheKey = (typeof(T), context.GetType());
+
+        var cached = _cache.GetOrAdd(cacheKey, _ => BuildEntityMetadata<T>(context));
+
+        return includeIdentity ? cached.ColumnsWithIdentity : cached.Columns;
     }
 
     /// <summary>
@@ -143,6 +143,18 @@ internal static class EntityMetadataHelper
 
         // If columns with identity differ from regular columns, there are identity columns
         return cached.ColumnsWithIdentity.Count > cached.Columns.Count;
+    }
+
+    /// <summary>
+    /// Gets the primary key columns for an entity.
+    /// </summary>
+    public static IReadOnlyList<ColumnMetadata> GetPrimaryKeyColumns<T>(DbContext context) where T : class
+    {
+        var cacheKey = (typeof(T), context.GetType());
+
+        var cached = _cache.GetOrAdd(cacheKey, _ => BuildEntityMetadata<T>(context));
+
+        return cached.PrimaryKeyColumns;
     }
 
     /// <summary>
