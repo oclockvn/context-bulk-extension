@@ -162,8 +162,7 @@ public static partial class DbContextBulkExtensionUpsert
         for (int i = 0; i < columns.Count; i++)
         {
             var column = columns[i];
-            var sqlType = GetSqlType(column.ClrType);
-            sql.Append($"    {EscapeSqlIdentifier(column.ColumnName)} {sqlType}");
+            sql.Append($"    {EscapeSqlIdentifier(column.ColumnName)} {column.SqlType}");
 
             if (i < columns.Count - 1)
                 sql.AppendLine(",");
@@ -252,31 +251,6 @@ public static partial class DbContextBulkExtensionUpsert
         sql.AppendLine(");");
 
         return sql.ToString();
-    }
-
-    /// <summary>
-    /// Maps CLR types to SQL Server types for CREATE TABLE.
-    /// </summary>
-    private static string GetSqlType(Type clrType)
-    {
-        return clrType.Name switch
-        {
-            nameof(Boolean) => "BIT",
-            nameof(Byte) => "TINYINT",
-            nameof(Int16) => "SMALLINT",
-            nameof(Int32) => "INT",
-            nameof(Int64) => "BIGINT",
-            nameof(Single) => "REAL",
-            nameof(Double) => "FLOAT",
-            nameof(Decimal) => "DECIMAL(18, 2)",
-            nameof(DateTime) => "DATETIME2",
-            nameof(DateTimeOffset) => "DATETIMEOFFSET",
-            nameof(TimeSpan) => "TIME",
-            nameof(Guid) => "UNIQUEIDENTIFIER",
-            nameof(String) => "NVARCHAR(MAX)",
-            "Byte[]" => "VARBINARY(MAX)",
-            _ => "NVARCHAR(MAX)" // Default fallback
-        };
     }
 
     /// <summary>
