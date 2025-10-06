@@ -6,7 +6,7 @@ namespace ContextBulkExtension;
 /// <summary>
 /// Memory-efficient IDataReader implementation for streaming entities to SqlBulkCopy.
 /// </summary>
-internal class EntityDataReader<T>(IEnumerable<T> entities, List<ColumnMetadata> columns) : DbDataReader where T : class
+internal class EntityDataReader<T>(IEnumerable<T> entities, IReadOnlyList<ColumnMetadata> columns) : DbDataReader where T : class
 {
     private readonly IEnumerator<T> _enumerator = entities.GetEnumerator();
     private bool _disposed;
@@ -124,17 +124,4 @@ internal class EntityDataReader<T>(IEnumerable<T> entities, List<ColumnMetadata>
         }
         base.Dispose(disposing);
     }
-}
-
-/// <summary>
-/// Metadata for a column mapping.
-/// </summary>
-internal class ColumnMetadata
-{
-    public required string ColumnName { get; init; }
-    public required System.Reflection.PropertyInfo PropertyInfo { get; init; }
-    public required Type ClrType { get; init; }
-    public required Func<object, object?> CompiledGetter { get; init; }
-    public required bool IsIdentity { get; init; }
-    public required bool IsPrimaryKey { get; init; }
 }

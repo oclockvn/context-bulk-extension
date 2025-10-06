@@ -124,11 +124,9 @@ public static partial class DbContextBulkExtensionUpsert
 
                 // Step 3: Execute MERGE statement
                 var mergeSql = BuildMergeSql(tableName, tempTableName, columns, primaryKeyColumns, options);
-                using (var mergeCmd = new SqlCommand(mergeSql, connection, sqlTransaction))
-                {
-                    mergeCmd.CommandTimeout = options.TimeoutSeconds;
-                    await mergeCmd.ExecuteNonQueryAsync();
-                }
+                using var mergeCmd = new SqlCommand(mergeSql, connection, sqlTransaction);
+                mergeCmd.CommandTimeout = options.TimeoutSeconds;
+                await mergeCmd.ExecuteNonQueryAsync();
             }
             finally
             {
@@ -156,7 +154,7 @@ public static partial class DbContextBulkExtensionUpsert
     /// <summary>
     /// Builds CREATE TABLE statement for temporary staging table.
     /// </summary>
-    private static string BuildCreateTempTableSql(string tempTableName, List<ColumnMetadata> columns)
+    private static string BuildCreateTempTableSql(string tempTableName, IReadOnlyList<ColumnMetadata> columns)
     {
         var sql = new StringBuilder();
         sql.AppendLine($"CREATE TABLE {tempTableName} (");
@@ -183,8 +181,8 @@ public static partial class DbContextBulkExtensionUpsert
     private static string BuildMergeSql(
         string targetTableName,
         string sourceTableName,
-        List<ColumnMetadata> columns,
-        List<ColumnMetadata> primaryKeyColumns,
+        IReadOnlyList<ColumnMetadata> columns,
+        IReadOnlyList<ColumnMetadata> primaryKeyColumns,
         BulkUpsertOptions options)
     {
         var sql = new StringBuilder();
@@ -214,9 +212,7 @@ public static partial class DbContextBulkExtensionUpsert
             // If UpdateColumns is specified, filter to only those columns
             if (options.UpdateColumns?.Count > 0)
             {
-                updateColumns = updateColumns
-                    .Where(c => options.UpdateColumns.Contains(c.ColumnName, StringComparer.OrdinalIgnoreCase))
-                    .ToList();
+                updateColumns = [.. updateColumns.Where(c => options.UpdateColumns.Contains(c.ColumnName, StringComparer.OrdinalIgnoreCase))];
             }
 
             if (updateColumns.Count > 0)

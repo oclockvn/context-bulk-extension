@@ -11,19 +11,6 @@ namespace ContextBulkExtension;
 internal static class EntityMetadataHelper
 {
     private static readonly ConcurrentDictionary<(Type EntityType, Type ContextType), CachedEntityMetadata> _cache = new();
-    /// <summary>
-    /// Extracts column metadata for bulk insert operations.
-    /// </summary>
-    /// <param name="context">The DbContext instance</param>
-    /// <param name="includeIdentity">Whether to include identity columns. Default is false.</param>
-    public static List<ColumnMetadata> GetColumnMetadata<T>(DbContext context, bool includeIdentity = false) where T : class
-    {
-        var cacheKey = (typeof(T), context.GetType());
-
-        var cached = _cache.GetOrAdd(cacheKey, _ => BuildEntityMetadata<T>(context));
-
-        return includeIdentity ? cached.ColumnsWithIdentity : cached.Columns;
-    }
 
     /// <summary>
     /// Builds complete entity metadata including columns and table name.
@@ -80,6 +67,7 @@ internal static class EntityMetadataHelper
             var columnMetadata = new ColumnMetadata
             {
                 ColumnName = columnName,
+                SqlType = property.GetColumnType(),
                 PropertyInfo = clrProperty,
                 ClrType = Nullable.GetUnderlyingType(clrType) ?? clrType,
                 CompiledGetter = compiledGetter,
@@ -119,6 +107,20 @@ internal static class EntityMetadataHelper
     }
 
     /// <summary>
+    /// Extracts column metadata for bulk insert operations.
+    /// </summary>
+    /// <param name="context">The DbContext instance</param>
+    /// <param name="includeIdentity">Whether to include identity columns. Default is false.</param>
+    public static IReadOnlyList<ColumnMetadata> GetColumnMetadata<T>(DbContext context, bool includeIdentity = false) where T : class
+    {
+        var cacheKey = (typeof(T), context.GetType());
+
+        var cached = _cache.GetOrAdd(cacheKey, _ => BuildEntityMetadata<T>(context));
+
+        return includeIdentity ? cached.ColumnsWithIdentity : cached.Columns;
+    }
+
+    /// <summary>
     /// Gets the full table name including schema.
     /// </summary>
     public static string GetTableName<T>(DbContext context) where T : class
@@ -146,7 +148,7 @@ internal static class EntityMetadataHelper
     /// <summary>
     /// Gets the primary key columns for an entity.
     /// </summary>
-    public static List<ColumnMetadata> GetPrimaryKeyColumns<T>(DbContext context) where T : class
+    public static IReadOnlyList<ColumnMetadata> GetPrimaryKeyColumns<T>(DbContext context) where T : class
     {
         var cacheKey = (typeof(T), context.GetType());
 
