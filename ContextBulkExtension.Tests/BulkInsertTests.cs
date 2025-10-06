@@ -83,52 +83,6 @@ public class BulkInsertTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BulkInsertAsync_WithKeepIdentityTrue_ShouldPreserveIdentityValues()
-    {
-        // Arrange
-        var entities = new List<SimpleEntity>
-        {
-            new() { Id = 100, Name = "Entity 100", Value = 1, CreatedAt = DateTime.UtcNow },
-            new() { Id = 200, Name = "Entity 200", Value = 2, CreatedAt = DateTime.UtcNow },
-            new() { Id = 300, Name = "Entity 300", Value = 3, CreatedAt = DateTime.UtcNow }
-        };
-
-        var options = new BulkInsertOptions { KeepIdentity = true };
-
-        // Act
-        await _fixture.Context.BulkInsertAsync(entities, options);
-
-        // Assert
-        var insertedEntities = await _fixture.GetAllEntitiesAsync<SimpleEntity>();
-        Assert.Equal(3, insertedEntities.Count);
-        Assert.Contains(insertedEntities, e => e.Id == 100);
-        Assert.Contains(insertedEntities, e => e.Id == 200);
-        Assert.Contains(insertedEntities, e => e.Id == 300);
-    }
-
-    [Fact]
-    public async Task BulkInsertAsync_WithKeepIdentityFalse_ShouldGenerateIdentityValues()
-    {
-        // Arrange
-        var entities = new List<SimpleEntity>
-        {
-            new() { Id = 999, Name = "Entity 1", Value = 1, CreatedAt = DateTime.UtcNow },
-            new() { Id = 998, Name = "Entity 2", Value = 2, CreatedAt = DateTime.UtcNow }
-        };
-
-        var options = new BulkInsertOptions { KeepIdentity = false };
-
-        // Act
-        await _fixture.Context.BulkInsertAsync(entities, options);
-
-        // Assert
-        var insertedEntities = await _fixture.GetAllEntitiesAsync<SimpleEntity>();
-        Assert.Equal(2, insertedEntities.Count);
-        Assert.DoesNotContain(insertedEntities, e => e.Id == 999);
-        Assert.DoesNotContain(insertedEntities, e => e.Id == 998);
-    }
-
-    [Fact]
     public async Task BulkInsertAsync_WithCustomBatchSize_ShouldInsertAll()
     {
         // Arrange

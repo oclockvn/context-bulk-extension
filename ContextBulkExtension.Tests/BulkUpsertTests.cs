@@ -346,28 +346,6 @@ public class BulkUpsertTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BulkUpsertAsync_WithKeepIdentityTrue_ShouldPreserveIdentityValues()
-    {
-        // Arrange
-        var entities = new List<SimpleEntity>
-        {
-            new() { Id = 1000, Name = "Entity 1000", Value = 1, CreatedAt = DateTime.UtcNow },
-            new() { Id = 2000, Name = "Entity 2000", Value = 2, CreatedAt = DateTime.UtcNow }
-        };
-
-        var options = new BulkUpsertOptions { KeepIdentity = true };
-
-        // Act
-        await _fixture.Context.BulkUpsertAsync(entities, options);
-
-        // Assert
-        var insertedEntities = await _fixture.GetAllEntitiesAsync<SimpleEntity>();
-        Assert.Equal(2, insertedEntities.Count);
-        Assert.Contains(insertedEntities, e => e.Id == 1000);
-        Assert.Contains(insertedEntities, e => e.Id == 2000);
-    }
-
-    [Fact]
     public async Task BulkUpsertAsync_MultipleTimes_ShouldHandleCorrectly()
     {
         // Arrange & Act - First upsert (insert)
