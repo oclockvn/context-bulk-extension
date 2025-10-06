@@ -19,4 +19,9 @@ internal class CachedEntityMetadata
     /// Full table name including schema.
     /// </summary>
     public required string TableName { get; init; }
+
+    /// <summary>
+    /// Primary key column metadata.
+    /// </summary>
+    public required List<ColumnMetadata> PrimaryKeyColumns { get; init; }
 }

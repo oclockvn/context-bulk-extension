@@ -40,6 +40,7 @@ internal static class EntityMetadataHelper
 
         var allColumns = new List<ColumnMetadata>();
         var columnsWithoutIdentity = new List<ColumnMetadata>();
+        var primaryKeyColumns = new List<ColumnMetadata>();
 
         foreach (var property in entityType.GetProperties())
         {
@@ -79,6 +80,12 @@ internal static class EntityMetadataHelper
 
             allColumns.Add(columnMetadata);
 
+            // Track primary key columns
+            if (property.IsPrimaryKey())
+            {
+                primaryKeyColumns.Add(columnMetadata);
+            }
+
             // Exclude identity columns from non-identity list
             bool isIdentity = property.ValueGenerated == ValueGenerated.OnAdd &&
                              (property.GetDefaultValueSql()?.Contains("IDENTITY", StringComparison.OrdinalIgnoreCase) == true ||
@@ -116,7 +123,8 @@ internal static class EntityMetadataHelper
         {
             Columns = columnsWithoutIdentity,
             ColumnsWithIdentity = allColumns,
-            TableName = fullTableName
+            TableName = fullTableName,
+            PrimaryKeyColumns = primaryKeyColumns
         };
     }
 
@@ -143,6 +151,18 @@ internal static class EntityMetadataHelper
 
         // If columns with identity differ from regular columns, there are identity columns
         return cached.ColumnsWithIdentity.Count > cached.Columns.Count;
+    }
+
+    /// <summary>
+    /// Gets the primary key columns for an entity.
+    /// </summary>
+    public static List<ColumnMetadata> GetPrimaryKeyColumns<T>(DbContext context) where T : class
+    {
+        var cacheKey = (typeof(T), context.GetType());
+
+        var cached = _cache.GetOrAdd(cacheKey, _ => BuildEntityMetadata<T>(context));
+
+        return cached.PrimaryKeyColumns;
     }
 
     /// <summary>
