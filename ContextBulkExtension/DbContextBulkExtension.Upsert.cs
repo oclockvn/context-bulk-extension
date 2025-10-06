@@ -62,7 +62,9 @@ public static partial class DbContextBulkExtensionUpsert
                 "BulkUpsertAsync requires a primary key to match existing records.");
         }
 
-        var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, options.KeepIdentity);
+        // For upsert, always include all columns (including identity) in temp table
+        // because we need primary keys to match records in MERGE statement
+        var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
         var tableName = EntityMetadataHelper.GetTableName<T>(context);
 
         // Ensure connection is open
@@ -230,22 +232,27 @@ public static partial class DbContextBulkExtensionUpsert
         }
 
         // WHEN NOT MATCHED clause (insert)
+        // When KeepIdentity = false, exclude identity columns from INSERT
+        var insertColumns = options.KeepIdentity
+            ? columns
+            : columns.Where(c => !c.IsIdentity).ToList();
+
         sql.AppendLine("WHEN NOT MATCHED BY TARGET THEN");
         sql.Append("    INSERT (");
 
-        for (int i = 0; i < columns.Count; i++)
+        for (int i = 0; i < insertColumns.Count; i++)
         {
             if (i > 0) sql.Append(", ");
-            sql.Append(EscapeSqlIdentifier(columns[i].ColumnName));
+            sql.Append(EscapeSqlIdentifier(insertColumns[i].ColumnName));
         }
 
         sql.AppendLine(")");
         sql.Append("    VALUES (");
 
-        for (int i = 0; i < columns.Count; i++)
+        for (int i = 0; i < insertColumns.Count; i++)
         {
             if (i > 0) sql.Append(", ");
-            sql.Append($"source.{EscapeSqlIdentifier(columns[i].ColumnName)}");
+            sql.Append($"source.{EscapeSqlIdentifier(insertColumns[i].ColumnName)}");
         }
 
         sql.AppendLine(");");

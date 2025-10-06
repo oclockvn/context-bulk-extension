@@ -10,7 +10,7 @@ public class BulkUpsertOptions : BulkInsertOptions
     /// If null (default), all non-primary key columns will be updated.
     /// If specified, only these columns will be updated on matched rows.
     /// </summary>
-    public List<string>? UpdateColumns { get; set; }
+    public List<string> UpdateColumns { get; set; } = [];
 
     /// <summary>
     /// When true, only inserts new records and skips updates for existing records.
