@@ -39,8 +39,6 @@ internal static class EntityMetadataHelper
         }
 
         var allColumns = new List<ColumnMetadata>();
-        var columnsWithoutIdentity = new List<ColumnMetadata>();
-        var primaryKeyColumns = new List<ColumnMetadata>();
 
         foreach (var property in entityType.GetProperties())
         {
@@ -70,35 +68,30 @@ internal static class EntityMetadataHelper
             // Compile expression delegate for fast property access
             var compiledGetter = CompilePropertyGetter<T>(property, clrProperty);
 
+            // Determine if this is a primary key
+            bool isPrimaryKey = property.IsPrimaryKey();
+
+            // Determine if this is an identity column
+            bool isIdentity = property.ValueGenerated == ValueGenerated.OnAdd &&
+                             (property.GetDefaultValueSql()?.Contains("IDENTITY", StringComparison.OrdinalIgnoreCase) == true ||
+                              property.GetValueGeneratorFactory() != null ||
+                              (isPrimaryKey && (property.ClrType == typeof(int) || property.ClrType == typeof(long))));
+
             var columnMetadata = new ColumnMetadata
             {
                 ColumnName = columnName,
                 PropertyInfo = clrProperty,
                 ClrType = Nullable.GetUnderlyingType(clrType) ?? clrType,
-                CompiledGetter = compiledGetter
+                CompiledGetter = compiledGetter,
+                IsIdentity = isIdentity,
+                IsPrimaryKey = isPrimaryKey
             };
 
             allColumns.Add(columnMetadata);
-
-            // Track primary key columns
-            if (property.IsPrimaryKey())
-            {
-                primaryKeyColumns.Add(columnMetadata);
-            }
-
-            // Exclude identity columns from non-identity list
-            bool isIdentity = property.ValueGenerated == ValueGenerated.OnAdd &&
-                             (property.GetDefaultValueSql()?.Contains("IDENTITY", StringComparison.OrdinalIgnoreCase) == true ||
-                              property.GetValueGeneratorFactory() != null ||
-                              (property.IsPrimaryKey() && (property.ClrType == typeof(int) || property.ClrType == typeof(long))));
-
-            if (!isIdentity)
-            {
-                columnsWithoutIdentity.Add(columnMetadata);
-            }
         }
 
-        if (columnsWithoutIdentity.Count == 0)
+        // Validate we have at least one non-identity column
+        if (!allColumns.Any(c => !c.IsIdentity))
         {
             throw new InvalidOperationException(
                 $"No valid columns found for entity type '{typeof(T).Name}'. " +
@@ -119,12 +112,9 @@ internal static class EntityMetadataHelper
             ? EscapeSqlIdentifier(tableName)
             : $"{EscapeSqlIdentifier(schema)}.{EscapeSqlIdentifier(tableName)}";
 
-        return new CachedEntityMetadata
+        return new CachedEntityMetadata(allColumns)
         {
-            Columns = columnsWithoutIdentity,
-            ColumnsWithIdentity = allColumns,
-            TableName = fullTableName,
-            PrimaryKeyColumns = primaryKeyColumns
+            TableName = fullTableName
         };
     }
 
