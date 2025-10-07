@@ -146,6 +146,14 @@ public static partial class DbContextBulkExtensionUpsert
                 // Step 4: Execute MERGE statement with custom match columns
                 var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, updateColumnNames, options);
 
+                // Debug: Print generated SQL
+                #if DEBUG
+                System.Diagnostics.Debug.WriteLine("=== GENERATED MERGE SQL ===");
+                System.Diagnostics.Debug.WriteLine(mergeSql);
+                System.Diagnostics.Debug.WriteLine($"InsertOnly: {options.InsertOnly}");
+                System.Diagnostics.Debug.WriteLine("=========================");
+                #endif
+
                 using var mergeCmd = new SqlCommand(mergeSql, connection, sqlTransaction);
                 mergeCmd.CommandTimeout = options.TimeoutSeconds;
                 await mergeCmd.ExecuteNonQueryAsync();
