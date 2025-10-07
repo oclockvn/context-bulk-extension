@@ -13,33 +13,21 @@ public static partial class DbContextBulkExtensionUpsert
 {
     /// <summary>
     /// Performs a high-performance bulk upsert (insert or update) of entities using SqlBulkCopy with MERGE statement.
-    /// Inserts new records and updates existing records based on primary key matching.
+    /// Inserts new records and updates existing records based on custom match columns or primary key matching.
     /// </summary>
     /// <typeparam name="T">The entity type</typeparam>
     /// <param name="context">The DbContext instance</param>
     /// <param name="entities">The entities to upsert</param>
+    /// <param name="matchOn">Expression specifying which columns to match on. Use single property (x => x.Email) or anonymous type (x => new { x.Email, x.Username }). If null (default), primary keys will be used.</param>
+    /// <param name="options">Configuration options for the bulk upsert operation. If null, default options will be used.</param>
     /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
-    /// <exception cref="InvalidOperationException">Thrown when entity has no primary key, entity type is not part of the model, or database provider is not SQL Server</exception>
-    public static async Task BulkUpsertAsync<T>(this DbContext context, IEnumerable<T> entities) where T : class
-    {
-        await BulkUpsertAsync(context, entities, new BulkUpsertOptions());
-    }
-
-    /// <summary>
-    /// Performs a high-performance bulk upsert (insert or update) of entities using SqlBulkCopy with MERGE statement.
-    /// Inserts new records and updates existing records based on primary key matching.
-    /// </summary>
-    /// <typeparam name="T">The entity type</typeparam>
-    /// <param name="context">The DbContext instance</param>
-    /// <param name="entities">The entities to upsert</param>
-    /// <param name="options">Configuration options for the bulk upsert operation</param>
-    /// <exception cref="ArgumentNullException">Thrown when context, entities, or options is null</exception>
-    /// <exception cref="InvalidOperationException">Thrown when entity has no primary key, entity type is not part of the model, or database provider is not SQL Server</exception>
-    public static async Task BulkUpsertAsync<T>(this DbContext context, IEnumerable<T> entities, BulkUpsertOptions options) where T : class
+    /// <exception cref="InvalidOperationException">Thrown when entity has no primary key (and matchOn is null), entity type is not part of the model, or database provider is not SQL Server</exception>
+    public static async Task BulkUpsertAsync<T>(this DbContext context, IEnumerable<T> entities, System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null, BulkUpsertOptions? options = null) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
-        ArgumentNullException.ThrowIfNull(options);
+
+        options ??= new BulkUpsertOptions();
 
         // Early return for empty collections
         if (entities.TryGetNonEnumeratedCount(out var count) && count == 0)
@@ -53,17 +41,43 @@ public static partial class DbContextBulkExtensionUpsert
                 $"BulkUpsertAsync only supports SQL Server. Current connection type: {dbConnection?.GetType().Name ?? "Unknown"}");
         }
 
-        // Get metadata
-        var primaryKeyColumns = EntityMetadataHelper.GetPrimaryKeyColumns<T>(context);
-        if (primaryKeyColumns.Count == 0)
+        // Determine which columns to match on
+        IReadOnlyList<ColumnMetadata> matchColumns;
+
+        if (matchOn != null)
         {
-            throw new InvalidOperationException(
-                $"Entity type '{typeof(T).Name}' has no primary key defined. " +
-                "BulkUpsertAsync requires a primary key to match existing records.");
+            // Extract property names from expression
+            var propertyNames = ExtractPropertyNamesFromExpression(matchOn);
+
+            // Get all columns and map property names to column metadata
+            var allColumns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
+            matchColumns = allColumns
+                .Where(c => propertyNames.Contains(c.PropertyInfo.Name))
+                .ToList();
+
+            // Validate all properties were found
+            if (matchColumns.Count != propertyNames.Count)
+            {
+                var missing = propertyNames.Except(matchColumns.Select(c => c.PropertyInfo.Name));
+                throw new InvalidOperationException(
+                    $"Properties not found in entity metadata: {string.Join(", ", missing)}. " +
+                    "Ensure the properties are mapped to database columns.");
+            }
+        }
+        else
+        {
+            // Fall back to primary keys (existing behavior)
+            matchColumns = EntityMetadataHelper.GetPrimaryKeyColumns<T>(context);
+
+            if (matchColumns.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"Entity type '{typeof(T).Name}' has no primary key defined. " +
+                    "Either define a primary key or use matchOn parameter to specify custom match columns.");
+            }
         }
 
         // For upsert, always include all columns (including identity) in temp table
-        // because we need primary keys to match records in MERGE statement
         var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
         var tableName = EntityMetadataHelper.GetTableName<T>(context);
 
@@ -121,8 +135,8 @@ public static partial class DbContextBulkExtensionUpsert
                 using var reader = new EntityDataReader<T>(entities, columns);
                 await bulkCopy.WriteToServerAsync(reader);
 
-                // Step 3: Execute MERGE statement
-                var mergeSql = BuildMergeSql(tableName, tempTableName, columns, primaryKeyColumns, options);
+                // Step 3: Execute MERGE statement with custom match columns
+                var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, options);
 
                 using var mergeCmd = new SqlCommand(mergeSql, connection, sqlTransaction);
                 mergeCmd.CommandTimeout = options.TimeoutSeconds;
@@ -266,5 +280,46 @@ public static partial class DbContextBulkExtensionUpsert
 
         // Replace ] with ]] (SQL Server escape sequence for brackets)
         return $"[{identifier.Replace("]", "]]")}]";
+    }
+
+    /// <summary>
+    /// Extracts property names from a MatchOn expression.
+    /// Supports single property (x => x.Email) or anonymous type (x => new { x.Email, x.Username }).
+    /// </summary>
+    private static List<string> ExtractPropertyNamesFromExpression<T>(System.Linq.Expressions.Expression<Func<T, object>> expression)
+    {
+        var propertyNames = new List<string>();
+
+        if (expression.Body is System.Linq.Expressions.NewExpression newExpression)
+        {
+            // Anonymous type: x => new { x.Email, x.Username }
+            foreach (var arg in newExpression.Arguments)
+            {
+                if (arg is System.Linq.Expressions.MemberExpression memberExpr)
+                {
+                    propertyNames.Add(memberExpr.Member.Name);
+                }
+            }
+        }
+        else if (expression.Body is System.Linq.Expressions.MemberExpression memberExpression)
+        {
+            // Single property: x => x.Email
+            propertyNames.Add(memberExpression.Member.Name);
+        }
+        else if (expression.Body is System.Linq.Expressions.UnaryExpression unaryExpression &&
+                 unaryExpression.Operand is System.Linq.Expressions.MemberExpression unaryMember)
+        {
+            // Boxing conversion: x => (object)x.Id
+            propertyNames.Add(unaryMember.Member.Name);
+        }
+
+        if (propertyNames.Count == 0)
+        {
+            throw new ArgumentException(
+                "Invalid MatchOn expression. Use either a single property (x => x.Email) " +
+                "or anonymous type (x => new { x.Email, x.Username }).");
+        }
+
+        return propertyNames;
     }
 }
