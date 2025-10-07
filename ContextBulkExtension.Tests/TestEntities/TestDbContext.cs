@@ -12,6 +12,7 @@ public class TestDbContext : DbContext
     public DbSet<CompositeKeyEntity> CompositeKeyEntities { get; set; }
     public DbSet<EntityWithoutIdentity> EntitiesWithoutIdentity { get; set; }
     public DbSet<EntityWithComputedColumn> EntitiesWithComputedColumn { get; set; }
+    public DbSet<UserEntity> UserEntities { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -58,6 +59,25 @@ public class TestDbContext : DbContext
             entity.Property(e => e.UpdatedAt)
                 .ValueGeneratedOnAddOrUpdate()
                 .HasDefaultValueSql("GETUTCDATE()");
+        });
+
+        // UserEntity configuration
+        modelBuilder.Entity<UserEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Email).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Username).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.FirstName).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.LastName).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Points).IsRequired();
+            entity.Property(e => e.IsActive).IsRequired();
+            entity.Property(e => e.RegisteredAt).IsRequired();
+
+            // Add unique index on Email for custom matchOn scenarios
+            entity.HasIndex(e => e.Email).IsUnique();
+            // Add composite index on Email + Username for composite matchOn tests
+            entity.HasIndex(e => new { e.Email, e.Username }).IsUnique();
         });
     }
 }

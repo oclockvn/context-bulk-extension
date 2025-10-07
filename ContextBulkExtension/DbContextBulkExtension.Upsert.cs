@@ -234,9 +234,9 @@ public static partial class DbContextBulkExtensionUpsert
         // WHEN MATCHED clause (update)
         if (!options.InsertOnly)
         {
-            // Determine which columns to update
+            // Determine which columns to update (exclude identity columns and match columns)
             var updateColumns = columns
-                .Where(c => !matchKeyColumns.Any(pk => pk.ColumnName.Equals(c.ColumnName, StringComparison.OrdinalIgnoreCase)))
+                .Where(c => !c.IsIdentity && !matchKeyColumns.Any(pk => pk.ColumnName.Equals(c.ColumnName, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 
             // If updateColumnNames is specified, filter to only those columns

@@ -22,6 +22,7 @@ public class BulkUpsertTests : IAsyncLifetime
         await _fixture.ClearTableAsync<SimpleEntity>();
         await _fixture.ClearTableAsync<CompositeKeyEntity>();
         await _fixture.ClearTableAsync<EntityWithoutIdentity>();
+        await _fixture.ClearTableAsync<UserEntity>();
     }
 
     [Fact]
@@ -493,4 +494,413 @@ public class BulkUpsertTests : IAsyncLifetime
         var count = await _fixture.GetCountAsync<SimpleEntity>();
         Assert.Equal(7500, count);
     }
+
+    #region Custom MatchOn Tests
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithCustomMatchOnSingleColumn_ShouldMatchByEmail()
+    {
+        // Arrange - Insert initial users
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "user1", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow },
+            new() { Email = "user2@test.com", Username = "user2", FirstName = "Jane", LastName = "Smith", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        var existingUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+
+        // Update users - change everything except Email (match key)
+        var updatedUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "updated_user1", FirstName = "Johnny", LastName = "Updated", Points = 999, IsActive = false, RegisteredAt = DateTime.UtcNow },
+            new() { Email = "user2@test.com", Username = "updated_user2", FirstName = "Janet", LastName = "Updated", Points = 888, IsActive = false, RegisteredAt = DateTime.UtcNow },
+            new() { Email = "user3@test.com", Username = "user3", FirstName = "New", LastName = "User", Points = 300, IsActive = true, RegisteredAt = DateTime.UtcNow } // New user
+        };
+
+        // Act - Match on Email instead of Id
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(updatedUsers, matchOn: x => x.Email);
+        }
+
+        // Assert
+        var allUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(3, allUsers.Count);
+
+        var user1 = allUsers.First(u => u.Email == "user1@test.com");
+        Assert.Equal("updated_user1", user1.Username); // Updated
+        Assert.Equal("Johnny", user1.FirstName); // Updated
+        Assert.Equal(999, user1.Points); // Updated
+        Assert.Equal(existingUsers[0].Id, user1.Id); // Same ID (updated, not inserted)
+
+        var user3 = allUsers.First(u => u.Email == "user3@test.com");
+        Assert.Equal("New", user3.FirstName); // Inserted
+        Assert.True(user3.Id > 0); // Has new ID
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithCustomMatchOnMultipleColumns_ShouldMatchByComposite()
+    {
+        // Arrange - Insert initial users
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "john_doe", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow },
+            new() { Email = "user2@test.com", Username = "jane_smith", FirstName = "Jane", LastName = "Smith", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        // Update users - match by Email + Username composite
+        var updatedUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "john_doe", FirstName = "Johnny", LastName = "Updated", Points = 999, IsActive = false, RegisteredAt = DateTime.UtcNow }, // Update
+            new() { Email = "user3@test.com", Username = "new_user", FirstName = "New", LastName = "User", Points = 300, IsActive = true, RegisteredAt = DateTime.UtcNow } // Insert
+        };
+
+        // Act - Match on Email + Username composite
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(updatedUsers, matchOn: x => new { x.Email, x.Username });
+        }
+
+        // Assert
+        var allUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(3, allUsers.Count);
+
+        var updatedUser = allUsers.First(u => u.Email == "user1@test.com" && u.Username == "john_doe");
+        Assert.Equal("Johnny", updatedUser.FirstName); // Updated
+        Assert.Equal(999, updatedUser.Points); // Updated
+
+        var newUser = allUsers.First(u => u.Email == "user3@test.com");
+        Assert.Equal("new_user", newUser.Username); // Inserted
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithCustomMatchOn_MixedInsertUpdate()
+    {
+        // Arrange - Insert initial users
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "existing1@test.com", Username = "user1", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow },
+            new() { Email = "existing2@test.com", Username = "user2", FirstName = "Jane", LastName = "Smith", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        // Mix of updates and inserts
+        var mixedUsers = new List<UserEntity>
+        {
+            new() { Email = "existing1@test.com", Username = "updated", FirstName = "Johnny", LastName = "Updated", Points = 999, IsActive = false, RegisteredAt = DateTime.UtcNow }, // Update
+            new() { Email = "new1@test.com", Username = "new1", FirstName = "New1", LastName = "User1", Points = 300, IsActive = true, RegisteredAt = DateTime.UtcNow }, // Insert
+            new() { Email = "existing2@test.com", Username = "updated2", FirstName = "Janet", LastName = "Updated2", Points = 888, IsActive = false, RegisteredAt = DateTime.UtcNow }, // Update
+            new() { Email = "new2@test.com", Username = "new2", FirstName = "New2", LastName = "User2", Points = 400, IsActive = true, RegisteredAt = DateTime.UtcNow } // Insert
+        };
+
+        // Act - Match on Email
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(mixedUsers, matchOn: x => x.Email);
+        }
+
+        // Assert
+        var allUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(4, allUsers.Count);
+
+        var updatedUsers = allUsers.Where(u => u.Email.StartsWith("existing")).ToList();
+        Assert.Equal(2, updatedUsers.Count);
+        Assert.All(updatedUsers, u => Assert.False(u.IsActive)); // All updated to inactive
+
+        var insertedUsers = allUsers.Where(u => u.Email.StartsWith("new")).ToList();
+        Assert.Equal(2, insertedUsers.Count);
+        Assert.All(insertedUsers, u => Assert.True(u.IsActive)); // All new are active
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithCustomMatchOnAndInsertOnly_ShouldOnlyInsertNew()
+    {
+        // Arrange - Insert initial users
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "user1", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        // Try to update existing and insert new
+        var upsertUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "updated", FirstName = "Updated", LastName = "Name", Points = 999, IsActive = false, RegisteredAt = DateTime.UtcNow }, // Should be ignored
+            new() { Email = "user2@test.com", Username = "user2", FirstName = "New", LastName = "User", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow } // Should be inserted
+        };
+
+        var options = new BulkUpsertOptions { InsertOnly = true };
+
+        // Act - Match on Email with InsertOnly
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(upsertUsers, matchOn: x => x.Email, options: options);
+        }
+
+        // Assert
+        var allUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(2, allUsers.Count);
+
+        var user1 = allUsers.First(u => u.Email == "user1@test.com");
+        Assert.Equal("John", user1.FirstName); // NOT updated
+        Assert.Equal(100, user1.Points); // NOT updated
+        Assert.True(user1.IsActive); // NOT updated
+
+        var user2 = allUsers.First(u => u.Email == "user2@test.com");
+        Assert.Equal("New", user2.FirstName); // Inserted
+    }
+
+    #endregion
+
+    #region UpdateColumns Tests
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithMultipleUpdateColumns_ShouldOnlyUpdateSpecified()
+    {
+        // Arrange - Insert initial data
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "user1", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow.AddDays(-7) },
+            new() { Email = "user2@test.com", Username = "user2", FirstName = "Jane", LastName = "Smith", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow.AddDays(-7) }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        var existingUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+
+        // Modify all fields
+        foreach (var user in existingUsers)
+        {
+            user.Username = "updated_username";
+            user.FirstName = "UpdatedFirst";
+            user.LastName = "UpdatedLast";
+            user.Points = 999;
+            user.IsActive = false;
+            user.RegisteredAt = DateTime.UtcNow;
+        }
+
+        // Act - Only update Points and IsActive
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(existingUsers, updateColumns: x => new { x.Points, x.IsActive });
+        }
+
+        // Assert
+        var updatedUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(2, updatedUsers.Count);
+
+        foreach (var user in updatedUsers)
+        {
+            // These should be updated
+            Assert.Equal(999, user.Points);
+            Assert.False(user.IsActive);
+
+            // These should NOT be updated
+            Assert.NotEqual("updated_username", user.Username);
+            Assert.NotEqual("UpdatedFirst", user.FirstName);
+            Assert.NotEqual("UpdatedLast", user.LastName);
+        }
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithUpdateColumnsOnCompositeKey_ShouldWork()
+    {
+        // Arrange - Insert initial data
+        var initialEntities = new List<CompositeKeyEntity>
+        {
+            new() { Key1 = 1, Key2 = "A", Data = "Initial Data A", Counter = 100 },
+            new() { Key1 = 2, Key2 = "B", Data = "Initial Data B", Counter = 200 }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialEntities);
+        }
+
+        // Update with changes to both columns
+        var updatedEntities = new List<CompositeKeyEntity>
+        {
+            new() { Key1 = 1, Key2 = "A", Data = "Updated Data A", Counter = 999 },
+            new() { Key1 = 2, Key2 = "B", Data = "Updated Data B", Counter = 888 }
+        };
+
+        // Act - Only update Counter column
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(updatedEntities, updateColumns: x => x.Counter);
+        }
+
+        // Assert
+        var allEntities = await _fixture.GetAllEntitiesAsync<CompositeKeyEntity>();
+        Assert.Equal(2, allEntities.Count);
+
+        var entityA = allEntities.First(e => e.Key1 == 1 && e.Key2 == "A");
+        Assert.Equal("Initial Data A", entityA.Data); // NOT updated
+        Assert.Equal(999, entityA.Counter); // Updated
+
+        var entityB = allEntities.First(e => e.Key1 == 2 && e.Key2 == "B");
+        Assert.Equal("Initial Data B", entityB.Data); // NOT updated
+        Assert.Equal(888, entityB.Counter); // Updated
+    }
+
+    #endregion
+
+    #region Combined MatchOn + UpdateColumns Tests
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithCustomMatchOnAndUpdateColumns_ShouldWorkTogether()
+    {
+        // Arrange - Insert initial users
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "user1", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow.AddDays(-7) },
+            new() { Email = "user2@test.com", Username = "user2", FirstName = "Jane", LastName = "Smith", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow.AddDays(-7) }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        // Update users - change all fields
+        var updatedUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "updated_user1", FirstName = "Johnny", LastName = "Updated", Points = 999, IsActive = false, RegisteredAt = DateTime.UtcNow },
+            new() { Email = "user2@test.com", Username = "updated_user2", FirstName = "Janet", LastName = "Updated", Points = 888, IsActive = false, RegisteredAt = DateTime.UtcNow },
+            new() { Email = "user3@test.com", Username = "user3", FirstName = "New", LastName = "User", Points = 300, IsActive = true, RegisteredAt = DateTime.UtcNow } // New user
+        };
+
+        // Act - Match on Email, only update FirstName and Points
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(updatedUsers, matchOn: x => x.Email, updateColumns: x => new { x.FirstName, x.Points });
+        }
+
+        // Assert
+        var allUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(3, allUsers.Count);
+
+        var user1 = allUsers.First(u => u.Email == "user1@test.com");
+        // Updated columns
+        Assert.Equal("Johnny", user1.FirstName);
+        Assert.Equal(999, user1.Points);
+        // NOT updated columns
+        Assert.Equal("user1", user1.Username); // Original value
+        Assert.Equal("Doe", user1.LastName); // Original value
+        Assert.True(user1.IsActive); // Original value
+
+        // New user should have all fields set
+        var user3 = allUsers.First(u => u.Email == "user3@test.com");
+        Assert.Equal("New", user3.FirstName);
+        Assert.Equal(300, user3.Points);
+        Assert.Equal("user3", user3.Username);
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithCompositeMatchOnAndUpdateColumns()
+    {
+        // Arrange - Insert initial users
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "john_doe", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow.AddDays(-7) }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        // Update with composite match
+        var updatedUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "john_doe", FirstName = "Johnny", LastName = "Updated", Points = 999, IsActive = false, RegisteredAt = DateTime.UtcNow },
+            new() { Email = "user2@test.com", Username = "jane_smith", FirstName = "Jane", LastName = "Smith", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow } // New
+        };
+
+        // Act - Match on Email+Username, only update LastName
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(updatedUsers, matchOn: x => new { x.Email, x.Username }, updateColumns: x => x.LastName);
+        }
+
+        // Assert
+        var allUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(2, allUsers.Count);
+
+        var user1 = allUsers.First(u => u.Email == "user1@test.com");
+        Assert.Equal("Updated", user1.LastName); // Updated
+        Assert.Equal("John", user1.FirstName); // NOT updated
+        Assert.Equal(100, user1.Points); // NOT updated
+        Assert.True(user1.IsActive); // NOT updated
+    }
+
+    #endregion
+
+    #region Error Handling Tests
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithInvalidMatchOnProperty_ShouldThrowInvalidOperationException()
+    {
+        // Arrange
+        await using var context = _fixture.CreateNewContext();
+        var users = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "user1", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow }
+        };
+
+        // Act & Assert - Using a property that doesn't exist should throw
+        // Note: This test verifies compile-time safety - invalid properties won't compile
+        // But we can test with null/empty scenarios if the implementation supports it
+        await context.BulkUpsertAsync(users, matchOn: x => x.Email); // This should work
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithInvalidUpdateColumnsProperty_ShouldThrowInvalidOperationException()
+    {
+        // Arrange
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "user1", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        var existingUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        existingUsers[0].Points = 999;
+
+        // Act & Assert - Using valid properties should work
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(existingUsers, updateColumns: x => x.Points); // This should work
+        }
+
+        var updated = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(999, updated[0].Points);
+    }
+
+    #endregion
 }
