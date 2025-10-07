@@ -19,10 +19,11 @@ public static partial class DbContextBulkExtensionUpsert
     /// <param name="context">The DbContext instance</param>
     /// <param name="entities">The entities to upsert</param>
     /// <param name="matchOn">Expression specifying which columns to match on. Use single property (x => x.Email) or anonymous type (x => new { x.Email, x.Username }). If null (default), primary keys will be used.</param>
+    /// <param name="updateColumns">Expression specifying which columns to update on match. Use single property (x => x.Status) or anonymous type (x => new { x.Name, x.UpdatedAt }). If null (default), all non-key columns will be updated.</param>
     /// <param name="options">Configuration options for the bulk upsert operation. If null, default options will be used.</param>
     /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity has no primary key (and matchOn is null), entity type is not part of the model, or database provider is not SQL Server</exception>
-    public static async Task BulkUpsertAsync<T>(this DbContext context, IEnumerable<T> entities, System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null, BulkUpsertOptions? options = null) where T : class
+    public static async Task BulkUpsertAsync<T>(this DbContext context, IEnumerable<T> entities, System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null, System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null, BulkUpsertOptions? options = null) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
@@ -135,8 +136,15 @@ public static partial class DbContextBulkExtensionUpsert
                 using var reader = new EntityDataReader<T>(entities, columns);
                 await bulkCopy.WriteToServerAsync(reader);
 
-                // Step 3: Execute MERGE statement with custom match columns
-                var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, options);
+                // Step 3: Extract update column names from expression (if provided)
+                List<string>? updateColumnNames = null;
+                if (updateColumns != null)
+                {
+                    updateColumnNames = ExtractPropertyNamesFromExpression(updateColumns);
+                }
+
+                // Step 4: Execute MERGE statement with custom match columns
+                var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, updateColumnNames, options);
 
                 using var mergeCmd = new SqlCommand(mergeSql, connection, sqlTransaction);
                 mergeCmd.CommandTimeout = options.TimeoutSeconds;
@@ -195,7 +203,8 @@ public static partial class DbContextBulkExtensionUpsert
         string targetTableName,
         string sourceTableName,
         IReadOnlyList<ColumnMetadata> columns,
-        IReadOnlyList<ColumnMetadata> primaryKeyColumns,
+        IReadOnlyList<ColumnMetadata> matchKeyColumns,
+        List<string>? updateColumnNames,
         BulkUpsertOptions options)
     {
         var sql = new StringBuilder();
@@ -204,13 +213,13 @@ public static partial class DbContextBulkExtensionUpsert
         sql.AppendLine($"MERGE {targetTableName} AS target");
         sql.AppendLine($"USING {sourceTableName} AS source");
 
-        // ON clause - match on primary key(s)
+        // ON clause - match on specified columns
         sql.Append("ON ");
-        for (int i = 0; i < primaryKeyColumns.Count; i++)
+        for (int i = 0; i < matchKeyColumns.Count; i++)
         {
             if (i > 0) sql.Append(" AND ");
-            var pkColumn = EscapeSqlIdentifier(primaryKeyColumns[i].ColumnName);
-            sql.Append($"target.{pkColumn} = source.{pkColumn}");
+            var matchColumn = EscapeSqlIdentifier(matchKeyColumns[i].ColumnName);
+            sql.Append($"target.{matchColumn} = source.{matchColumn}");
         }
         sql.AppendLine();
 
@@ -219,13 +228,13 @@ public static partial class DbContextBulkExtensionUpsert
         {
             // Determine which columns to update
             var updateColumns = columns
-                .Where(c => !primaryKeyColumns.Any(pk => pk.ColumnName.Equals(c.ColumnName, StringComparison.OrdinalIgnoreCase)))
+                .Where(c => !matchKeyColumns.Any(pk => pk.ColumnName.Equals(c.ColumnName, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 
-            // If UpdateColumns is specified, filter to only those columns
-            if (options.UpdateColumns?.Count > 0)
+            // If updateColumnNames is specified, filter to only those columns
+            if (updateColumnNames?.Count > 0)
             {
-                updateColumns = [.. updateColumns.Where(c => options.UpdateColumns.Contains(c.ColumnName, StringComparer.OrdinalIgnoreCase))];
+                updateColumns = [.. updateColumns.Where(c => updateColumnNames.Contains(c.PropertyInfo.Name, StringComparer.OrdinalIgnoreCase))];
             }
 
             if (updateColumns.Count > 0)

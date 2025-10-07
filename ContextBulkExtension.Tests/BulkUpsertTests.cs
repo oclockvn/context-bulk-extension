@@ -227,13 +227,8 @@ public class BulkUpsertTests : IAsyncLifetime
         existingEntity.Value = 999;
         existingEntity.CreatedAt = DateTime.UtcNow;
 
-        var options = new BulkUpsertOptions
-        {
-            UpdateColumns = [nameof(SimpleEntity.Value)]
-        };
-
-        // Act
-        await _fixture.Context.BulkUpsertAsync([existingEntity], options);
+        // Act - Only update Value column using expression
+        await _fixture.Context.BulkUpsertAsync([existingEntity], updateColumns: x => x.Value);
 
         // Assert
         var updatedEntity = (await _fixture.GetAllEntitiesAsync<SimpleEntity>()).First();
