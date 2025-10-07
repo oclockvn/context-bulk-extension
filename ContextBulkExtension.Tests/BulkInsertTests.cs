@@ -31,7 +31,8 @@ public class BulkInsertTests : IAsyncLifetime
         var entities = new List<SimpleEntity>();
 
         // Act & Assert
-        await _fixture.Context.BulkInsertAsync(entities);
+        await using var context = _fixture.CreateNewContext();
+        await context.BulkInsertAsync(entities);
         var count = await _fixture.GetCountAsync<SimpleEntity>();
         Assert.Equal(0, count);
     }
@@ -48,7 +49,8 @@ public class BulkInsertTests : IAsyncLifetime
         };
 
         // Act
-        await _fixture.Context.BulkInsertAsync(new[] { entity });
+        await using var context = _fixture.CreateNewContext();
+        await context.BulkInsertAsync(new[] { entity });
 
         // Assert
         var entities = await _fixture.GetAllEntitiesAsync<SimpleEntity>();
@@ -72,7 +74,8 @@ public class BulkInsertTests : IAsyncLifetime
             .ToList();
 
         // Act
-        await _fixture.Context.BulkInsertAsync(entities);
+        await using var context = _fixture.CreateNewContext();
+        await context.BulkInsertAsync(entities);
 
         // Assert
         var count = await _fixture.GetCountAsync<SimpleEntity>();
@@ -98,7 +101,8 @@ public class BulkInsertTests : IAsyncLifetime
         var options = new BulkInsertOptions { BatchSize = 500 };
 
         // Act
-        await _fixture.Context.BulkInsertAsync(entities, options);
+        await using var context = _fixture.CreateNewContext();
+        await context.BulkInsertAsync(entities, options);
 
         // Assert
         var count = await _fixture.GetCountAsync<SimpleEntity>();
@@ -119,7 +123,8 @@ public class BulkInsertTests : IAsyncLifetime
             .ToList();
 
         // Act
-        await _fixture.Context.BulkInsertAsync(entities);
+        await using var context = _fixture.CreateNewContext();
+        await context.BulkInsertAsync(entities);
 
         // Assert
         var count = await _fixture.GetCountAsync<EntityWithoutIdentity>();
@@ -137,7 +142,8 @@ public class BulkInsertTests : IAsyncLifetime
         };
 
         // Act
-        await _fixture.Context.BulkInsertAsync(entities);
+        await using var context = _fixture.CreateNewContext();
+        await context.BulkInsertAsync(entities);
 
         // Assert
         var insertedEntities = await _fixture.GetAllEntitiesAsync<EntityWithComputedColumn>();
@@ -165,9 +171,9 @@ public class BulkInsertTests : IAsyncLifetime
             .ToList();
 
         // Act
-        await _fixture.ExecuteInTransactionAsync(async () =>
+        await _fixture.ExecuteInTransactionAsync(async (context) =>
         {
-            await _fixture.Context.BulkInsertAsync(entities);
+            await context.BulkInsertAsync(entities);
         });
 
         // Assert
@@ -189,8 +195,9 @@ public class BulkInsertTests : IAsyncLifetime
             .ToList();
 
         // Act
-        await using var transaction = await _fixture.Context.Database.BeginTransactionAsync();
-        await _fixture.Context.BulkInsertAsync(entities);
+        await using var context = _fixture.CreateNewContext();
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        await context.BulkInsertAsync(entities);
         await transaction.RollbackAsync();
 
         // Assert
@@ -214,11 +221,12 @@ public class BulkInsertTests : IAsyncLifetime
     public async Task BulkInsertAsync_WithNullEntities_ShouldThrowArgumentNullException()
     {
         // Arrange
+        await using var context = _fixture.CreateNewContext();
         List<SimpleEntity>? nullEntities = null;
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentNullException>(() =>
-            _fixture.Context.BulkInsertAsync(nullEntities!));
+            context.BulkInsertAsync(nullEntities!));
     }
 
     [Fact]
@@ -237,7 +245,8 @@ public class BulkInsertTests : IAsyncLifetime
         var options = new BulkInsertOptions { CheckConstraints = false };
 
         // Act
-        await _fixture.Context.BulkInsertAsync(entities, options);
+        await using var context = _fixture.CreateNewContext();
+        await context.BulkInsertAsync(entities, options);
 
         // Assert
         var count = await _fixture.GetCountAsync<SimpleEntity>();
@@ -260,7 +269,8 @@ public class BulkInsertTests : IAsyncLifetime
         var options = new BulkInsertOptions { UseTableLock = false };
 
         // Act
-        await _fixture.Context.BulkInsertAsync(entities, options);
+        await using var context = _fixture.CreateNewContext();
+        await context.BulkInsertAsync(entities, options);
 
         // Assert
         var count = await _fixture.GetCountAsync<SimpleEntity>();
