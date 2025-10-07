@@ -7,7 +7,6 @@ namespace ContextBulkExtension.Tests.Fixtures;
 public class DatabaseFixture : IAsyncLifetime
 {
     private readonly MsSqlContainer _container;
-    private TestDbContext? _context;
 
     public DatabaseFixture()
     {
@@ -16,54 +15,57 @@ public class DatabaseFixture : IAsyncLifetime
             .Build();
     }
 
-    public TestDbContext Context => _context ?? throw new InvalidOperationException("Database not initialized");
     public string ConnectionString => _container.GetConnectionString();
 
     public async Task InitializeAsync()
     {
         await _container.StartAsync();
 
-        var options = new DbContextOptionsBuilder<TestDbContext>()
-            .UseSqlServer(_container.GetConnectionString())
-            .Options;
-
-        _context = new TestDbContext(options);
-        await _context.Database.EnsureCreatedAsync();
+        // Create a context just to ensure database schema is created
+        await using var context = CreateNewContext();
+        await context.Database.EnsureCreatedAsync();
     }
 
     public async Task DisposeAsync()
     {
-        if (_context != null)
-        {
-            await _context.DisposeAsync();
-        }
-
         await _container.DisposeAsync();
+    }
+
+    public TestDbContext CreateNewContext()
+    {
+        var options = new DbContextOptionsBuilder<TestDbContext>()
+            .UseSqlServer(_container.GetConnectionString())
+            .Options;
+
+        return new TestDbContext(options);
     }
 
     public async Task<List<T>> GetAllEntitiesAsync<T>() where T : class
     {
-        return await Context.Set<T>().ToListAsync();
+        await using var context = CreateNewContext();
+        return await context.Set<T>().AsNoTracking().ToListAsync();
     }
 
     public async Task ClearTableAsync<T>() where T : class
     {
-        Context.Set<T>().RemoveRange(Context.Set<T>());
-        await Context.SaveChangesAsync();
+        await using var context = CreateNewContext();
+        await context.Set<T>().ExecuteDeleteAsync();
     }
 
     public async Task SeedDataAsync<T>(IEnumerable<T> entities) where T : class
     {
-        await Context.Set<T>().AddRangeAsync(entities);
-        await Context.SaveChangesAsync();
+        await using var context = CreateNewContext();
+        await context.Set<T>().AddRangeAsync(entities);
+        await context.SaveChangesAsync();
     }
 
-    public async Task ExecuteInTransactionAsync(Func<Task> action)
+    public async Task ExecuteInTransactionAsync(Func<TestDbContext, Task> action)
     {
-        await using var transaction = await Context.Database.BeginTransactionAsync();
+        await using var context = CreateNewContext();
+        await using var transaction = await context.Database.BeginTransactionAsync();
         try
         {
-            await action();
+            await action(context);
             await transaction.CommitAsync();
         }
         catch
@@ -75,6 +77,7 @@ public class DatabaseFixture : IAsyncLifetime
 
     public async Task<int> GetCountAsync<T>() where T : class
     {
-        return await Context.Set<T>().CountAsync();
+        await using var context = CreateNewContext();
+        return await context.Set<T>().CountAsync();
     }
 }

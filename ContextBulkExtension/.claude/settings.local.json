@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Read(//e/projects/ContextBulkExtension/ContextBulkExtension/**)"
+      "Read(//e/projects/ContextBulkExtension/ContextBulkExtension/**)",
+      "Bash(dotnet test:*)"
     ],
     "deny": [],
     "ask": []
