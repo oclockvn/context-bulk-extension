@@ -21,9 +21,10 @@ public static partial class DbContextBulkExtensionUpsert
     /// <param name="matchOn">Expression specifying which columns to match on. Use single property (x => x.Email) or anonymous type (x => new { x.Email, x.Username }). If null (default), primary keys will be used.</param>
     /// <param name="updateColumns">Expression specifying which columns to update on match. Use single property (x => x.Status) or anonymous type (x => new { x.Name, x.UpdatedAt }). If null (default), all non-key columns will be updated.</param>
     /// <param name="options">Configuration options for the bulk upsert operation. If null, default options will be used.</param>
+    /// <param name="cancellationToken">The cancellation token</param>
     /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity has no primary key (and matchOn is null), entity type is not part of the model, or database provider is not SQL Server</exception>
-    public static async Task BulkUpsertAsync<T>(this DbContext context, IEnumerable<T> entities, System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null, System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null, BulkUpsertOptions? options = null) where T : class
+    public static async Task BulkUpsertAsync<T>(this DbContext context, IEnumerable<T> entities, System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null, System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null, BulkUpsertOptions? options = null, CancellationToken cancellationToken = default) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
@@ -85,7 +86,7 @@ public static partial class DbContextBulkExtensionUpsert
         // Ensure connection is open
         if (connection.State != ConnectionState.Open)
         {
-            await connection.OpenAsync();
+            await connection.OpenAsync(cancellationToken);
         }
 
         // Generate unique temp table name to support concurrent operations
@@ -106,7 +107,7 @@ public static partial class DbContextBulkExtensionUpsert
             var createTempTableSql = BuildCreateTempTableSql(tempTableName, columns);
             using (var createCmd = new SqlCommand(createTempTableSql, connection, sqlTransaction))
             {
-                await createCmd.ExecuteNonQueryAsync();
+                await createCmd.ExecuteNonQueryAsync(cancellationToken);
             }
 
             try
@@ -134,7 +135,7 @@ public static partial class DbContextBulkExtensionUpsert
 
                 // Bulk insert to temp table
                 using var reader = new EntityDataReader<T>(entities, columns);
-                await bulkCopy.WriteToServerAsync(reader);
+                await bulkCopy.WriteToServerAsync(reader, cancellationToken);
 
                 // Step 3: Extract update column names from expression (if provided)
                 List<string>? updateColumnNames = null;
@@ -156,7 +157,7 @@ public static partial class DbContextBulkExtensionUpsert
 
                 using var mergeCmd = new SqlCommand(mergeSql, connection, sqlTransaction);
                 mergeCmd.CommandTimeout = options.TimeoutSeconds;
-                await mergeCmd.ExecuteNonQueryAsync();
+                await mergeCmd.ExecuteNonQueryAsync(cancellationToken);
             }
             finally
             {
@@ -165,7 +166,7 @@ public static partial class DbContextBulkExtensionUpsert
                 {
                     var dropTempTableSql = $"IF OBJECT_ID('tempdb..{tempTableName}') IS NOT NULL DROP TABLE {tempTableName};";
                     using var dropCmd = new SqlCommand(dropTempTableSql, connection, sqlTransaction);
-                    await dropCmd.ExecuteNonQueryAsync();
+                    await dropCmd.ExecuteNonQueryAsync(cancellationToken);
                 }
                 catch
                 {
