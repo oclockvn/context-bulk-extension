@@ -17,11 +17,12 @@ public static class DbContextBulkExtension
     /// <typeparam name="T">The entity type</typeparam>
     /// <param name="context">The DbContext instance</param>
     /// <param name="entities">The entities to insert</param>
+    /// <param name="cancellationToken">The cancellation token</param>
     /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity type is not part of the model or database provider is not SQL Server</exception>
-    public static async Task BulkInsertAsync<T>(this DbContext context, IEnumerable<T> entities) where T : class
+    public static async Task BulkInsertAsync<T>(this DbContext context, IEnumerable<T> entities, CancellationToken cancellationToken = default) where T : class
     {
-        await BulkInsertAsync(context, entities, new BulkInsertOptions());
+        await BulkInsertAsync(context, entities, new BulkInsertOptions(), cancellationToken);
     }
 
     /// <summary>
@@ -32,9 +33,10 @@ public static class DbContextBulkExtension
     /// <param name="context">The DbContext instance</param>
     /// <param name="entities">The entities to insert</param>
     /// <param name="options">Configuration options for the bulk insert operation</param>
+    /// <param name="cancellationToken">The cancellation token</param>
     /// <exception cref="ArgumentNullException">Thrown when context, entities, or options is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity type is not part of the model or database provider is not SQL Server</exception>
-    public static async Task BulkInsertAsync<T>(this DbContext context, IEnumerable<T> entities, BulkInsertOptions options) where T : class
+    public static async Task BulkInsertAsync<T>(this DbContext context, IEnumerable<T> entities, BulkInsertOptions options, CancellationToken cancellationToken = default) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
@@ -60,7 +62,7 @@ public static class DbContextBulkExtension
         // Ensure connection is open (let EF Core/ADO.NET manage connection lifecycle)
         if (connection.State != ConnectionState.Open)
         {
-            await connection.OpenAsync();
+            await connection.OpenAsync(cancellationToken);
         }
 
         try
@@ -102,7 +104,7 @@ public static class DbContextBulkExtension
 
             // Create data reader and perform bulk insert
             using var reader = new EntityDataReader<T>(entities, columns);
-            await bulkCopy.WriteToServerAsync(reader);
+            await bulkCopy.WriteToServerAsync(reader, cancellationToken);
         }
         catch (SqlException ex)
         {
