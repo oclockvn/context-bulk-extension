@@ -903,4 +903,285 @@ public class BulkUpsertTests : IAsyncLifetime
     }
 
     #endregion
+
+    #region SyncIdentity Tests
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithSyncIdentityEnabled_ShouldSyncGeneratedIds()
+    {
+        // Arrange
+        var entities = Enumerable.Range(1, 100)
+            .Select(i => new SimpleEntity
+            {
+                Name = $"Entity {i}",
+                Value = i,
+                CreatedAt = DateTime.UtcNow
+            })
+            .ToList();
+
+        var options = new BulkUpsertOptions { SyncIdentity = true };
+
+        // Act
+        await using var context = _fixture.CreateNewContext();
+        await context.BulkUpsertAsync(entities, options: options);
+
+        // Assert - All entities should have their IDs synced
+        Assert.All(entities, e => Assert.True(e.Id > 0, "Entity ID should be synced from database"));
+
+        // Verify IDs are unique
+        var uniqueIds = entities.Select(e => e.Id).Distinct().Count();
+        Assert.Equal(100, uniqueIds);
+
+        // Verify entities exist in database with same IDs
+        var dbEntities = await _fixture.GetAllEntitiesAsync<SimpleEntity>();
+        foreach (var entity in entities)
+        {
+            Assert.Contains(dbEntities, db => db.Id == entity.Id && db.Name == entity.Name);
+        }
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithSyncIdentityDisabled_ShouldNotSyncIds()
+    {
+        // Arrange
+        var entities = Enumerable.Range(1, 50)
+            .Select(i => new SimpleEntity
+            {
+                Name = $"Entity {i}",
+                Value = i,
+                CreatedAt = DateTime.UtcNow
+            })
+            .ToList();
+
+        var options = new BulkUpsertOptions { SyncIdentity = false };
+
+        // Act
+        await using var context = _fixture.CreateNewContext();
+        await context.BulkUpsertAsync(entities, options: options);
+
+        // Assert - Entity IDs should remain 0 (not synced)
+        Assert.All(entities, e => Assert.Equal(0, e.Id));
+
+        // But entities should exist in database
+        var count = await _fixture.GetCountAsync<SimpleEntity>();
+        Assert.Equal(50, count);
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithSyncIdentity_OnlyAffectsInsertedRecords()
+    {
+        // Arrange - Insert initial data
+        var initialEntities = Enumerable.Range(1, 50)
+            .Select(i => new SimpleEntity
+            {
+                Name = $"Initial {i}",
+                Value = i,
+                CreatedAt = DateTime.UtcNow
+            })
+            .ToList();
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialEntities);
+        }
+
+        var existingEntities = await _fixture.GetAllEntitiesAsync<SimpleEntity>();
+        var originalIds = existingEntities.Select(e => e.Id).ToList();
+
+        // Update existing entities
+        foreach (var entity in existingEntities)
+        {
+            entity.Value = entity.Value * 10;
+        }
+
+        // Add new entities
+        var newEntities = Enumerable.Range(51, 50)
+            .Select(i => new SimpleEntity
+            {
+                Name = $"New {i}",
+                Value = i,
+                CreatedAt = DateTime.UtcNow
+            })
+            .ToList();
+
+        var allEntities = existingEntities.Concat(newEntities).ToList();
+
+        var options = new BulkUpsertOptions { SyncIdentity = true };
+
+        // Act
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(allEntities, options: options);
+        }
+
+        // Assert - Existing entities should keep their IDs unchanged
+        for (int i = 0; i < existingEntities.Count; i++)
+        {
+            Assert.Equal(originalIds[i], existingEntities[i].Id);
+        }
+
+        // New entities should have IDs synced
+        Assert.All(newEntities, e => Assert.True(e.Id > 0, "New entity ID should be synced"));
+        Assert.All(newEntities, e => Assert.DoesNotContain(originalIds, id => id == e.Id));
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithSyncIdentityAndCustomMatchOn_ShouldSyncNewRecords()
+    {
+        // Arrange - Insert initial users
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "user1", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow },
+            new() { Email = "user2@test.com", Username = "user2", FirstName = "Jane", LastName = "Smith", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        var existingUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        var originalIds = existingUsers.Select(u => u.Id).ToList();
+
+        // Mix of updates and inserts - match on Email
+        var mixedUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "updated", FirstName = "Johnny", LastName = "Updated", Points = 999, IsActive = false, RegisteredAt = DateTime.UtcNow }, // Update
+            new() { Email = "user3@test.com", Username = "user3", FirstName = "New", LastName = "User", Points = 300, IsActive = true, RegisteredAt = DateTime.UtcNow }, // Insert
+            new() { Email = "user4@test.com", Username = "user4", FirstName = "Another", LastName = "New", Points = 400, IsActive = true, RegisteredAt = DateTime.UtcNow } // Insert
+        };
+
+        var options = new BulkUpsertOptions { SyncIdentity = true };
+
+        // Act
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(mixedUsers, matchOn: x => x.Email, options: options);
+        }
+
+        // Assert - First user should have ID set (but it's an update, so ID might not be meaningful in input list)
+        // New users should have IDs synced
+        var user3 = mixedUsers.First(u => u.Email == "user3@test.com");
+        var user4 = mixedUsers.First(u => u.Email == "user4@test.com");
+
+        Assert.True(user3.Id > 0, "New user3 should have ID synced");
+        Assert.True(user4.Id > 0, "New user4 should have ID synced");
+        Assert.NotEqual(user3.Id, user4.Id);
+
+        // Verify in database
+        var allUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(4, allUsers.Count);
+        Assert.Contains(allUsers, u => u.Id == user3.Id && u.Email == "user3@test.com");
+        Assert.Contains(allUsers, u => u.Id == user4.Id && u.Email == "user4@test.com");
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithSyncIdentityAndCompositeKeys_ShouldWork()
+    {
+        // Arrange - Insert initial entities
+        var initialEntities = new List<CompositeKeyEntity>
+        {
+            new() { Key1 = 1, Key2 = "A", Data = "Initial Data A", Counter = 100 },
+            new() { Key1 = 2, Key2 = "B", Data = "Initial Data B", Counter = 200 }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialEntities);
+        }
+
+        // Mix of updates and inserts
+        var mixedEntities = new List<CompositeKeyEntity>
+        {
+            new() { Key1 = 1, Key2 = "A", Data = "Updated Data A", Counter = 999 }, // Update
+            new() { Key1 = 3, Key2 = "C", Data = "New Data C", Counter = 300 }, // Insert
+            new() { Key1 = 4, Key2 = "D", Data = "New Data D", Counter = 400 } // Insert
+        };
+
+        var options = new BulkUpsertOptions { SyncIdentity = true };
+
+        // Act - Note: CompositeKeyEntity may not have identity columns
+        // This test verifies that SyncIdentity doesn't break when there are no identity columns
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(mixedEntities, options: options);
+        }
+
+        // Assert
+        var allEntities = await _fixture.GetAllEntitiesAsync<CompositeKeyEntity>();
+        Assert.Equal(4, allEntities.Count);
+
+        var entityA = allEntities.First(e => e.Key1 == 1 && e.Key2 == "A");
+        Assert.Equal("Updated Data A", entityA.Data);
+        Assert.Equal(999, entityA.Counter);
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithSyncIdentityAndLargeDataset_ShouldPerformEfficiently()
+    {
+        // Arrange - Large dataset to test performance
+        var entities = Enumerable.Range(1, 5000)
+            .Select(i => new SimpleEntity
+            {
+                Name = $"Entity {i}",
+                Value = i,
+                CreatedAt = DateTime.UtcNow
+            })
+            .ToList();
+
+        var options = new BulkUpsertOptions { SyncIdentity = true };
+
+        // Act
+        await using var context = _fixture.CreateNewContext();
+        await context.BulkUpsertAsync(entities, options: options);
+
+        // Assert - All 5000 entities should have IDs synced
+        Assert.All(entities, e => Assert.True(e.Id > 0));
+
+        var uniqueIds = entities.Select(e => e.Id).Distinct().Count();
+        Assert.Equal(5000, uniqueIds);
+
+        var count = await _fixture.GetCountAsync<SimpleEntity>();
+        Assert.Equal(5000, count);
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithSyncIdentityAndInsertOnly_ShouldSyncOnlyInserted()
+    {
+        // Arrange - Insert initial data
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "user1", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        // Try to update existing and insert new
+        var upsertUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "updated", FirstName = "Updated", LastName = "Name", Points = 999, IsActive = false, RegisteredAt = DateTime.UtcNow }, // Should be ignored
+            new() { Email = "user2@test.com", Username = "user2", FirstName = "New", LastName = "User", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow } // Should be inserted
+        };
+
+        var options = new BulkUpsertOptions { InsertOnly = true, SyncIdentity = true };
+
+        // Act
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(upsertUsers, matchOn: x => x.Email, options: options);
+        }
+
+        // Assert - Only user2 should have ID synced (it was inserted)
+        var user2 = upsertUsers.First(u => u.Email == "user2@test.com");
+        Assert.True(user2.Id > 0, "New user should have ID synced");
+
+        var allUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(2, allUsers.Count);
+        Assert.Contains(allUsers, u => u.Id == user2.Id && u.Email == "user2@test.com");
+    }
+
+    #endregion
 }
