@@ -1183,5 +1183,123 @@ public class BulkUpsertTests : IAsyncLifetime
         Assert.Contains(allUsers, u => u.Id == user2.Id && u.Email == "user2@test.com");
     }
 
+    [Fact]
+    public async Task BulkUpsertAsync_WithIdentityOutputOnUpdate_ShouldSyncExistingIds()
+    {
+        // Arrange - Insert initial users without capturing IDs in input entities
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "user1", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow },
+            new() { Email = "user2@test.com", Username = "user2", FirstName = "Jane", LastName = "Smith", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        // Get actual IDs from database
+        var dbUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        var user1Id = dbUsers.First(u => u.Email == "user1@test.com").Id;
+        var user2Id = dbUsers.First(u => u.Email == "user2@test.com").Id;
+
+        // Create new entity objects without IDs (simulating data coming from external source)
+        var updateUsers = new List<UserEntity>
+        {
+            new() { Email = "user1@test.com", Username = "user1_updated", FirstName = "Johnny", LastName = "Updated", Points = 999, IsActive = false, RegisteredAt = DateTime.UtcNow }, // Update
+            new() { Email = "user2@test.com", Username = "user2_updated", FirstName = "Janet", LastName = "Updated", Points = 888, IsActive = false, RegisteredAt = DateTime.UtcNow }  // Update
+        };
+
+        // Verify IDs are not set initially (default to 0)
+        Assert.All(updateUsers, u => Assert.Equal(0, u.Id));
+
+        var options = new BulkUpsertOptions { IdentityOutput = true };
+
+        // Act - Match on Email, should update existing records and sync their IDs back
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(updateUsers, matchOn: x => x.Email, options: options);
+        }
+
+        // Assert - Updated entities should now have their IDs synced from database
+        var user1 = updateUsers.First(u => u.Email == "user1@test.com");
+        var user2 = updateUsers.First(u => u.Email == "user2@test.com");
+
+        Assert.Equal(user1Id, user1.Id); // ID should match the existing database record
+        Assert.Equal(user2Id, user2.Id); // ID should match the existing database record
+        Assert.True(user1.Id > 0, "Updated user1 should have ID synced");
+        Assert.True(user2.Id > 0, "Updated user2 should have ID synced");
+
+        // Verify the updates were applied in database
+        var updatedDbUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(2, updatedDbUsers.Count);
+
+        var dbUser1 = updatedDbUsers.First(u => u.Email == "user1@test.com");
+        Assert.Equal("user1_updated", dbUser1.Username);
+        Assert.Equal(999, dbUser1.Points);
+
+        var dbUser2 = updatedDbUsers.First(u => u.Email == "user2@test.com");
+        Assert.Equal("user2_updated", dbUser2.Username);
+        Assert.Equal(888, dbUser2.Points);
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithIdentityOutputOnMixedOperations_ShouldSyncAllIds()
+    {
+        // Arrange - Insert initial data
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "existing@test.com", Username = "existing", FirstName = "Existing", LastName = "User", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        var dbUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        var existingUserId = dbUsers.First(u => u.Email == "existing@test.com").Id;
+
+        // Create mix of update and insert without IDs
+        var mixedUsers = new List<UserEntity>
+        {
+            new() { Email = "existing@test.com", Username = "updated", FirstName = "Updated", LastName = "Existing", Points = 999, IsActive = false, RegisteredAt = DateTime.UtcNow }, // UPDATE
+            new() { Email = "new1@test.com", Username = "new1", FirstName = "New", LastName = "User1", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow }, // INSERT
+            new() { Email = "new2@test.com", Username = "new2", FirstName = "Another", LastName = "User2", Points = 300, IsActive = true, RegisteredAt = DateTime.UtcNow } // INSERT
+        };
+
+        Assert.All(mixedUsers, u => Assert.Equal(0, u.Id));
+
+        var options = new BulkUpsertOptions { IdentityOutput = true };
+
+        // Act
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(mixedUsers, matchOn: x => x.Email, options: options);
+        }
+
+        // Assert - All entities should have IDs synced (both updated and inserted)
+        Assert.All(mixedUsers, u => Assert.True(u.Id > 0, $"User {u.Email} should have ID synced"));
+
+        var existingUser = mixedUsers.First(u => u.Email == "existing@test.com");
+        var newUser1 = mixedUsers.First(u => u.Email == "new1@test.com");
+        var newUser2 = mixedUsers.First(u => u.Email == "new2@test.com");
+
+        // Updated user should keep the same ID
+        Assert.Equal(existingUserId, existingUser.Id);
+
+        // New users should have different IDs
+        Assert.NotEqual(existingUserId, newUser1.Id);
+        Assert.NotEqual(existingUserId, newUser2.Id);
+        Assert.NotEqual(newUser1.Id, newUser2.Id);
+
+        // Verify in database
+        var allDbUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(3, allDbUsers.Count);
+        Assert.Contains(allDbUsers, u => u.Id == existingUser.Id && u.Email == "existing@test.com" && u.Points == 999);
+        Assert.Contains(allDbUsers, u => u.Id == newUser1.Id && u.Email == "new1@test.com");
+        Assert.Contains(allDbUsers, u => u.Id == newUser2.Id && u.Email == "new2@test.com");
+    }
+
     #endregion
 }
