@@ -10,4 +10,10 @@ public class BulkUpsertOptions : BulkInsertOptions
     /// Default is false (performs both insert and update operations).
     /// </summary>
     public bool InsertOnly { get; set; } = false;
+
+    /// <summary>
+    /// When true, syncs auto-generated identity values back to the original entities after insert.
+    /// Default is false (no identity synchronization).
+    /// </summary>
+    public bool IdentityOutput { get; set; } = false;
 }

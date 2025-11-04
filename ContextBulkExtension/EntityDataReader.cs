@@ -6,12 +6,13 @@ namespace ContextBulkExtension;
 /// <summary>
 /// Memory-efficient IDataReader implementation for streaming entities to SqlBulkCopy.
 /// </summary>
-internal class EntityDataReader<T>(IEnumerable<T> entities, IReadOnlyList<ColumnMetadata> columns) : DbDataReader where T : class
+internal class EntityDataReader<T>(IEnumerable<T> entities, IReadOnlyList<ColumnMetadata> columns, bool includeRowIndex = false) : DbDataReader where T : class
 {
     private readonly IEnumerator<T> _enumerator = entities.GetEnumerator();
     private bool _disposed;
+    private int _currentRowIndex = -1;
 
-    public override int FieldCount => columns.Count;
+    public override int FieldCount => includeRowIndex ? columns.Count + 1 : columns.Count;
 
     public override bool HasRows => true;
 
@@ -27,7 +28,12 @@ internal class EntityDataReader<T>(IEnumerable<T> entities, IReadOnlyList<Column
 
     public override bool Read()
     {
-        return _enumerator.MoveNext();
+        var hasNext = _enumerator.MoveNext();
+        if (hasNext)
+        {
+            _currentRowIndex++;
+        }
+        return hasNext;
     }
 
     public override object GetValue(int ordinal)
@@ -35,7 +41,15 @@ internal class EntityDataReader<T>(IEnumerable<T> entities, IReadOnlyList<Column
         if (_enumerator.Current == null)
             throw new InvalidOperationException("No current row");
 
-        var column = columns[ordinal];
+        // If row index is included, it's the first column (ordinal 0)
+        if (includeRowIndex && ordinal == 0)
+        {
+            return _currentRowIndex;
+        }
+
+        // Adjust ordinal if row index is included
+        var columnIndex = includeRowIndex ? ordinal - 1 : ordinal;
+        var column = columns[columnIndex];
         var value = column.CompiledGetter(_enumerator.Current);
 
         return value ?? DBNull.Value;
@@ -43,27 +57,43 @@ internal class EntityDataReader<T>(IEnumerable<T> entities, IReadOnlyList<Column
 
     public override string GetName(int ordinal)
     {
-        return columns[ordinal].ColumnName;
+        if (includeRowIndex && ordinal == 0)
+            return BulkOperationConstants.RowIndexColumnName;
+
+        var columnIndex = includeRowIndex ? ordinal - 1 : ordinal;
+        return columns[columnIndex].ColumnName;
     }
 
     public override int GetOrdinal(string name)
     {
+        if (includeRowIndex && name.Equals(BulkOperationConstants.RowIndexColumnName, StringComparison.OrdinalIgnoreCase))
+            return 0;
+
+        var startIndex = includeRowIndex ? 1 : 0;
         for (int i = 0; i < columns.Count; i++)
         {
             if (columns[i].ColumnName.Equals(name, StringComparison.OrdinalIgnoreCase))
-                return i;
+                return i + startIndex;
         }
         throw new IndexOutOfRangeException($"Column '{name}' not found");
     }
 
     public override string GetDataTypeName(int ordinal)
     {
-        return columns[ordinal].ClrType.Name;
+        if (includeRowIndex && ordinal == 0)
+            return "Int32";
+
+        var columnIndex = includeRowIndex ? ordinal - 1 : ordinal;
+        return columns[columnIndex].ClrType.Name;
     }
 
     public override Type GetFieldType(int ordinal)
     {
-        return columns[ordinal].ClrType;
+        if (includeRowIndex && ordinal == 0)
+            return typeof(int);
+
+        var columnIndex = includeRowIndex ? ordinal - 1 : ordinal;
+        return columns[columnIndex].ClrType;
     }
 
     public override bool IsDBNull(int ordinal)

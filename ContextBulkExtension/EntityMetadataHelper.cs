@@ -54,6 +54,7 @@ internal static class EntityMetadataHelper
 
             // Compile expression delegate for fast property access
             var compiledGetter = CompilePropertyGetter<T>(property, clrProperty);
+            var compiledSetter = CompilePropertySetter<T>(property, clrProperty);
 
             // Determine if this is a primary key
             bool isPrimaryKey = property.IsPrimaryKey();
@@ -71,6 +72,7 @@ internal static class EntityMetadataHelper
                 PropertyInfo = clrProperty,
                 ClrType = Nullable.GetUnderlyingType(clrType) ?? clrType,
                 CompiledGetter = compiledGetter,
+                CompiledSetter = compiledSetter,
                 IsIdentity = isIdentity,
                 IsPrimaryKey = isPrimaryKey
             };
@@ -155,6 +157,18 @@ internal static class EntityMetadataHelper
         var cached = _cache.GetOrAdd(cacheKey, _ => BuildEntityMetadata<T>(context));
 
         return cached.PrimaryKeyColumns;
+    }
+
+    /// <summary>
+    /// Gets the identity columns for an entity.
+    /// </summary>
+    public static IReadOnlyList<ColumnMetadata> GetIdentityColumns<T>(DbContext context) where T : class
+    {
+        var cacheKey = (typeof(T), context.GetType());
+
+        var cached = _cache.GetOrAdd(cacheKey, _ => BuildEntityMetadata<T>(context));
+
+        return cached.ColumnsWithIdentity.Where(c => c.IsIdentity).ToList();
     }
 
     /// <summary>
@@ -257,6 +271,91 @@ internal static class EntityMetadataHelper
             : (Expression)propertyAccess;
 
         return Expression.Lambda<Func<object, object?>>(finalExpression, parameter).Compile();
+    }
+
+    /// <summary>
+    /// Compiles a fast property setter with support for complex properties and value converters.
+    /// </summary>
+    private static Action<object, object?> CompilePropertySetter<T>(IProperty property, System.Reflection.PropertyInfo clrProperty) where T : class
+    {
+        var instanceParam = Expression.Parameter(typeof(object), "instance");
+        var valueParam = Expression.Parameter(typeof(object), "value");
+
+        Expression propertyAccess;
+        Expression typedInstance;
+
+        // Check if this is a complex property (EF Core 8+)
+        var complexProperty = property.DeclaringType as IComplexType;
+
+        if (complexProperty != null)
+        {
+            // Handle nested complex property access: instance.ComplexProp.Property
+            var complexPropInfo = complexProperty.ComplexProperty.PropertyInfo;
+            if (complexPropInfo == null)
+            {
+                throw new InvalidOperationException($"Complex property '{complexProperty.ComplexProperty.Name}' has no PropertyInfo.");
+            }
+
+            var complexPropDeclaringType = complexPropInfo.DeclaringType!;
+
+            // Cast instance to declaring type
+            typedInstance = complexPropDeclaringType.IsValueType
+                ? Expression.Unbox(instanceParam, complexPropDeclaringType)
+                : Expression.Convert(instanceParam, complexPropDeclaringType);
+
+            // Access complex property: instance.ComplexProp
+            var complexAccess = Expression.Property(typedInstance, complexPropInfo);
+
+            // Access nested property: instance.ComplexProp.Property
+            propertyAccess = Expression.Property(complexAccess, clrProperty);
+        }
+        else
+        {
+            // Simple property access: instance.Property
+            var declaringType = clrProperty.DeclaringType!;
+
+            // Use Unbox for value types, Convert for reference types
+            typedInstance = typeof(T).IsValueType
+                ? Expression.Unbox(instanceParam, typeof(T))
+                : Expression.Convert(instanceParam, typeof(T));
+
+            propertyAccess = Expression.Property(typedInstance, clrProperty);
+        }
+
+        // Convert value parameter to property type
+        Expression convertedValue;
+        var propertyType = clrProperty.PropertyType;
+
+        // Handle nullable types
+        if (propertyType.IsValueType && Nullable.GetUnderlyingType(propertyType) == null)
+        {
+            // Non-nullable value type: unbox
+            convertedValue = Expression.Convert(valueParam, propertyType);
+        }
+        else
+        {
+            // Reference type or nullable: convert
+            convertedValue = Expression.Convert(valueParam, propertyType);
+        }
+
+        // Apply EF Core value converter if exists (convert from provider value back to model value)
+        var converter = property.GetValueConverter();
+        if (converter != null)
+        {
+            var convertMethod = converter.GetType().GetMethod("ConvertFromProvider",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+
+            if (convertMethod != null)
+            {
+                var converterConstant = Expression.Constant(converter);
+                convertedValue = Expression.Call(converterConstant, convertMethod, convertedValue);
+            }
+        }
+
+        // Create assignment: instance.Property = value
+        var assignment = Expression.Assign(propertyAccess, convertedValue);
+
+        return Expression.Lambda<Action<object, object?>>(assignment, instanceParam, valueParam).Compile();
     }
 
 }

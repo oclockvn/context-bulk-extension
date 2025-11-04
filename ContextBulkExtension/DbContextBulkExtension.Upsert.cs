@@ -90,7 +90,7 @@ public static partial class DbContextBulkExtensionUpsert
         }
 
         // Generate unique temp table name to support concurrent operations
-        var tempTableName = $"#TempStaging_{Guid.NewGuid():N}";
+        var tempTableName = $"{BulkOperationConstants.TempTablePrefix}{Guid.NewGuid():N}";
 
         try
         {
@@ -103,8 +103,12 @@ public static partial class DbContextBulkExtensionUpsert
                 sqlTransaction = currentTransaction.GetDbTransaction() as SqlTransaction;
             }
 
+            // Check if we need to sync identity values
+            var identityColumns = options.IdentityOutput ? EntityMetadataHelper.GetIdentityColumns<T>(context) : null;
+            var needsIdentitySync = identityColumns?.Count > 0 && options.IdentityOutput;
+
             // Step 1: Create temp staging table
-            var createTempTableSql = BuildCreateTempTableSql(tempTableName, columns);
+            var createTempTableSql = BuildCreateTempTableSql(tempTableName, columns, needsIdentitySync);
             using (var createCmd = new SqlCommand(createTempTableSql, connection, sqlTransaction))
             {
                 await createCmd.ExecuteNonQueryAsync(cancellationToken);
@@ -127,14 +131,19 @@ public static partial class DbContextBulkExtensionUpsert
                     EnableStreaming = options.EnableStreaming
                 };
 
-                // Map columns
+                // Map columns (add row index mapping if needed)
+                if (needsIdentitySync)
+                {
+                    bulkCopy.ColumnMappings.Add(BulkOperationConstants.RowIndexColumnName, BulkOperationConstants.RowIndexColumnName);
+                }
+
                 foreach (var column in columns)
                 {
                     bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
                 }
 
                 // Bulk insert to temp table
-                using var reader = new EntityDataReader<T>(entities, columns);
+                using var reader = new EntityDataReader<T>(entities, columns, needsIdentitySync);
                 await bulkCopy.WriteToServerAsync(reader, cancellationToken);
 
                 // Step 3: Extract update column names from expression (if provided)
@@ -145,19 +154,55 @@ public static partial class DbContextBulkExtensionUpsert
                 }
 
                 // Step 4: Execute MERGE statement with custom match columns
-                var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, updateColumnNames, options);
+                var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, updateColumnNames, options, identityColumns);
 
                 // Debug: Print generated SQL
                 #if DEBUG
                 System.Diagnostics.Debug.WriteLine("=== GENERATED MERGE SQL ===");
                 System.Diagnostics.Debug.WriteLine(mergeSql);
                 System.Diagnostics.Debug.WriteLine($"InsertOnly: {options.InsertOnly}");
+                System.Diagnostics.Debug.WriteLine($"SyncIdentity: {options.IdentityOutput}");
                 System.Diagnostics.Debug.WriteLine("=========================");
                 #endif
 
                 using var mergeCmd = new SqlCommand(mergeSql, connection, sqlTransaction);
                 mergeCmd.CommandTimeout = options.TimeoutSeconds;
-                await mergeCmd.ExecuteNonQueryAsync(cancellationToken);
+
+                // If identity sync is enabled, read OUTPUT results and sync back to entities
+                if (needsIdentitySync)
+                {
+                    // Convert entities to list to access by index
+                    var entitiesList = entities as IList<T> ?? [.. entities];
+
+                    using var outputReader = await mergeCmd.ExecuteReaderAsync(cancellationToken);
+
+                    // Read OUTPUT results and sync identity values back to entities
+                    while (await outputReader.ReadAsync(cancellationToken))
+                    {
+                        var rowIndex = outputReader.GetInt32(0);
+                        var action = outputReader.GetString(outputReader.FieldCount - 1);
+
+                        // Only process INSERT actions (skip UPDATE)
+                        if (action == BulkOperationConstants.MergeActionInsert)
+                        {
+                            var entity = entitiesList[rowIndex];
+
+                            // Set each identity column value (starting at index 1, after rowIndex)
+                            for (int i = 0; i < identityColumns!.Count; i++)
+                            {
+                                var identityColumn = identityColumns[i];
+                                var identityValue = outputReader.GetValue(i + 1);
+
+                                // Use compiled setter to set the identity value
+                                identityColumn.CompiledSetter(entity, identityValue);
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    await mergeCmd.ExecuteNonQueryAsync(cancellationToken);
+                }
             }
             finally
             {
@@ -185,10 +230,16 @@ public static partial class DbContextBulkExtensionUpsert
     /// <summary>
     /// Builds CREATE TABLE statement for temporary staging table.
     /// </summary>
-    private static string BuildCreateTempTableSql(string tempTableName, IReadOnlyList<ColumnMetadata> columns)
+    private static string BuildCreateTempTableSql(string tempTableName, IReadOnlyList<ColumnMetadata> columns, bool includeRowIndex = false)
     {
         var sql = new StringBuilder();
         sql.AppendLine($"CREATE TABLE {tempTableName} (");
+
+        // Add row index column as first column if requested
+        if (includeRowIndex)
+        {
+            sql.AppendLine($"    [{BulkOperationConstants.RowIndexColumnName}] INT,");
+        }
 
         for (int i = 0; i < columns.Count; i++)
         {
@@ -214,7 +265,8 @@ public static partial class DbContextBulkExtensionUpsert
         IReadOnlyList<ColumnMetadata> columns,
         IReadOnlyList<ColumnMetadata> matchKeyColumns,
         List<string>? updateColumnNames,
-        BulkUpsertOptions options)
+        BulkUpsertOptions options,
+        IReadOnlyList<ColumnMetadata>? identityColumns = null)
     {
         var sql = new StringBuilder();
 
@@ -283,7 +335,23 @@ public static partial class DbContextBulkExtensionUpsert
             sql.Append($"source.{EscapeSqlIdentifier(insertColumns[i].ColumnName)}");
         }
 
-        sql.AppendLine(");");
+        sql.AppendLine(")");
+
+        // Add OUTPUT clause if identity sync is enabled and there are identity columns
+        if (options.IdentityOutput && identityColumns?.Count > 0)
+        {
+            sql.Append($"OUTPUT source.[{BulkOperationConstants.RowIndexColumnName}]");
+
+            // Output all identity columns
+            foreach (var identityColumn in identityColumns)
+            {
+                sql.Append($", INSERTED.{EscapeSqlIdentifier(identityColumn.ColumnName)}");
+            }
+
+            sql.AppendLine($", {BulkOperationConstants.MergeActionColumn}");
+        }
+
+        sql.AppendLine(";");
 
         return sql.ToString();
     }

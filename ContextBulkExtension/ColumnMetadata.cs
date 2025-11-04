@@ -10,6 +10,7 @@ internal class ColumnMetadata
     public required System.Reflection.PropertyInfo PropertyInfo { get; init; }
     public required Type ClrType { get; init; }
     public required Func<object, object?> CompiledGetter { get; init; }
+    public required Action<object, object?> CompiledSetter { get; init; }
     public required bool IsIdentity { get; init; }
     public required bool IsPrimaryKey { get; init; }
 }
