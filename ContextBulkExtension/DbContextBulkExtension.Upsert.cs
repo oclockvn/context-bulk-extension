@@ -90,7 +90,7 @@ public static partial class DbContextBulkExtensionUpsert
         }
 
         // Generate unique temp table name to support concurrent operations
-        var tempTableName = $"#TempStaging_{Guid.NewGuid():N}";
+        var tempTableName = $"{BulkOperationConstants.TempTablePrefix}{Guid.NewGuid():N}";
 
         try
         {
@@ -134,7 +134,7 @@ public static partial class DbContextBulkExtensionUpsert
                 // Map columns (add row index mapping if needed)
                 if (needsIdentitySync)
                 {
-                    bulkCopy.ColumnMappings.Add("__RowIndex", "__RowIndex");
+                    bulkCopy.ColumnMappings.Add(BulkOperationConstants.RowIndexColumnName, BulkOperationConstants.RowIndexColumnName);
                 }
 
                 foreach (var column in columns)
@@ -183,7 +183,7 @@ public static partial class DbContextBulkExtensionUpsert
                         var action = outputReader.GetString(outputReader.FieldCount - 1);
 
                         // Only process INSERT actions (skip UPDATE)
-                        if (action == "INSERT")
+                        if (action == BulkOperationConstants.MergeActionInsert)
                         {
                             var entity = entitiesList[rowIndex];
 
@@ -238,7 +238,7 @@ public static partial class DbContextBulkExtensionUpsert
         // Add row index column as first column if requested
         if (includeRowIndex)
         {
-            sql.AppendLine("    [__RowIndex] INT,");
+            sql.AppendLine($"    [{BulkOperationConstants.RowIndexColumnName}] INT,");
         }
 
         for (int i = 0; i < columns.Count; i++)
@@ -340,7 +340,7 @@ public static partial class DbContextBulkExtensionUpsert
         // Add OUTPUT clause if identity sync is enabled and there are identity columns
         if (options.IdentityOutput && identityColumns?.Count > 0)
         {
-            sql.Append("OUTPUT source.[__RowIndex]");
+            sql.Append($"OUTPUT source.[{BulkOperationConstants.RowIndexColumnName}]");
 
             // Output all identity columns
             foreach (var identityColumn in identityColumns)
@@ -348,7 +348,7 @@ public static partial class DbContextBulkExtensionUpsert
                 sql.Append($", INSERTED.{EscapeSqlIdentifier(identityColumn.ColumnName)}");
             }
 
-            sql.AppendLine(", $action");
+            sql.AppendLine($", {BulkOperationConstants.MergeActionColumn}");
         }
 
         sql.AppendLine(";");

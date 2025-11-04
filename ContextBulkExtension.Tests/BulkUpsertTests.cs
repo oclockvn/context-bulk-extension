@@ -904,10 +904,10 @@ public class BulkUpsertTests : IAsyncLifetime
 
     #endregion
 
-    #region SyncIdentity Tests
+    #region IdentityOutput Tests
 
     [Fact]
-    public async Task BulkUpsertAsync_WithSyncIdentityEnabled_ShouldSyncGeneratedIds()
+    public async Task BulkUpsertAsync_WithIdentityOutputEnabled_ShouldSyncGeneratedIds()
     {
         // Arrange
         var entities = Enumerable.Range(1, 100)
@@ -941,7 +941,7 @@ public class BulkUpsertTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BulkUpsertAsync_WithSyncIdentityDisabled_ShouldNotSyncIds()
+    public async Task BulkUpsertAsync_WithIdentityOutputDisabled_ShouldNotSyncIds()
     {
         // Arrange
         var entities = Enumerable.Range(1, 50)
@@ -968,7 +968,7 @@ public class BulkUpsertTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BulkUpsertAsync_WithSyncIdentity_OnlyAffectsInsertedRecords()
+    public async Task BulkUpsertAsync_WithIdentityOutput_OnlyAffectsInsertedRecords()
     {
         // Arrange - Insert initial data
         var initialEntities = Enumerable.Range(1, 50)
@@ -1026,7 +1026,7 @@ public class BulkUpsertTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BulkUpsertAsync_WithSyncIdentityAndCustomMatchOn_ShouldSyncNewRecords()
+    public async Task BulkUpsertAsync_WithIdentityOutputAndCustomMatchOn_ShouldSyncNewRecords()
     {
         // Arrange - Insert initial users
         var initialUsers = new List<UserEntity>
@@ -1076,7 +1076,7 @@ public class BulkUpsertTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BulkUpsertAsync_WithSyncIdentityAndCompositeKeys_ShouldWork()
+    public async Task BulkUpsertAsync_WithIdentityOutputAndCompositeKeys_ShouldWork()
     {
         // Arrange - Insert initial entities
         var initialEntities = new List<CompositeKeyEntity>
@@ -1101,7 +1101,7 @@ public class BulkUpsertTests : IAsyncLifetime
         var options = new BulkUpsertOptions { IdentityOutput = true };
 
         // Act - Note: CompositeKeyEntity may not have identity columns
-        // This test verifies that SyncIdentity doesn't break when there are no identity columns
+        // This test verifies that IdentityOutput doesn't break when there are no identity columns
         await using (var context = _fixture.CreateNewContext())
         {
             await context.BulkUpsertAsync(mixedEntities, options: options);
@@ -1117,7 +1117,7 @@ public class BulkUpsertTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BulkUpsertAsync_WithSyncIdentityAndLargeDataset_ShouldPerformEfficiently()
+    public async Task BulkUpsertAsync_WithIdentityOutputAndLargeDataset_ShouldPerformEfficiently()
     {
         // Arrange - Large dataset to test performance
         var entities = Enumerable.Range(1, 5000)
@@ -1146,7 +1146,7 @@ public class BulkUpsertTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BulkUpsertAsync_WithSyncIdentityAndInsertOnly_ShouldSyncOnlyInserted()
+    public async Task BulkUpsertAsync_WithIdentityOutputAndInsertOnly_ShouldSyncOnlyInserted()
     {
         // Arrange - Insert initial data
         var initialUsers = new List<UserEntity>

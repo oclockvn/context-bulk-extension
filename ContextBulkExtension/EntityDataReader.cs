@@ -58,7 +58,7 @@ internal class EntityDataReader<T>(IEnumerable<T> entities, IReadOnlyList<Column
     public override string GetName(int ordinal)
     {
         if (includeRowIndex && ordinal == 0)
-            return "__RowIndex";
+            return BulkOperationConstants.RowIndexColumnName;
 
         var columnIndex = includeRowIndex ? ordinal - 1 : ordinal;
         return columns[columnIndex].ColumnName;
@@ -66,7 +66,7 @@ internal class EntityDataReader<T>(IEnumerable<T> entities, IReadOnlyList<Column
 
     public override int GetOrdinal(string name)
     {
-        if (includeRowIndex && name.Equals("__RowIndex", StringComparison.OrdinalIgnoreCase))
+        if (includeRowIndex && name.Equals(BulkOperationConstants.RowIndexColumnName, StringComparison.OrdinalIgnoreCase))
             return 0;
 
         var startIndex = includeRowIndex ? 1 : 0;
