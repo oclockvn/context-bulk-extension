@@ -10,4 +10,4 @@ await db.BulkInsertAsync(entities);
 ## Roadmap
 
 - [ ] BulkMerge
-- [ ] Identity output
+- [x] Identity output
