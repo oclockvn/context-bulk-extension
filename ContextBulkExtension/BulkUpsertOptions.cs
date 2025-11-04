@@ -12,7 +12,11 @@ public class BulkUpsertOptions : BulkInsertOptions
     public bool InsertOnly { get; set; } = false;
 
     /// <summary>
-    /// When true, syncs auto-generated identity values back to the original entities after insert.
+    /// When true, syncs identity values back to the original entities after upsert operation.
+    /// This is useful when matching on non-identity columns (e.g., Email, Username) and you need the identity values populated.
+    /// - INSERT: Syncs newly generated identity values
+    /// - UPDATE: Syncs existing identity values from database to entities
+    /// Adds ~10-20% overhead for tracking and mapping identity values.
     /// Default is false (no identity synchronization).
     /// </summary>
     public bool IdentityOutput { get; set; } = false;

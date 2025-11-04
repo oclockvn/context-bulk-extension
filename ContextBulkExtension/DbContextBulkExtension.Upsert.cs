@@ -182,8 +182,10 @@ public static partial class DbContextBulkExtensionUpsert
                         var rowIndex = outputReader.GetInt32(0);
                         var action = outputReader.GetString(outputReader.FieldCount - 1);
 
-                        // Only process INSERT actions (skip UPDATE)
-                        if (action == BulkOperationConstants.MergeActionInsert)
+                        // Process both INSERT and UPDATE actions
+                        // INSERT: newly created records get their generated identity
+                        // UPDATE: existing records get their identity synced (useful when matching on non-identity columns)
+                        if (action == BulkOperationConstants.MergeActionInsert || action == BulkOperationConstants.MergeActionUpdate)
                         {
                             var entity = entitiesList[rowIndex];
 
