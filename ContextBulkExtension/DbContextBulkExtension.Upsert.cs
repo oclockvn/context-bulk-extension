@@ -104,8 +104,8 @@ public static partial class DbContextBulkExtensionUpsert
             }
 
             // Check if we need to sync identity values
-            var identityColumns = options.SyncIdentity ? EntityMetadataHelper.GetIdentityColumns<T>(context) : null;
-            var needsIdentitySync = identityColumns?.Count > 0 && options.SyncIdentity;
+            var identityColumns = options.IdentityOutput ? EntityMetadataHelper.GetIdentityColumns<T>(context) : null;
+            var needsIdentitySync = identityColumns?.Count > 0 && options.IdentityOutput;
 
             // Step 1: Create temp staging table
             var createTempTableSql = BuildCreateTempTableSql(tempTableName, columns, needsIdentitySync);
@@ -161,7 +161,7 @@ public static partial class DbContextBulkExtensionUpsert
                 System.Diagnostics.Debug.WriteLine("=== GENERATED MERGE SQL ===");
                 System.Diagnostics.Debug.WriteLine(mergeSql);
                 System.Diagnostics.Debug.WriteLine($"InsertOnly: {options.InsertOnly}");
-                System.Diagnostics.Debug.WriteLine($"SyncIdentity: {options.SyncIdentity}");
+                System.Diagnostics.Debug.WriteLine($"SyncIdentity: {options.IdentityOutput}");
                 System.Diagnostics.Debug.WriteLine("=========================");
                 #endif
 
@@ -338,7 +338,7 @@ public static partial class DbContextBulkExtensionUpsert
         sql.AppendLine(")");
 
         // Add OUTPUT clause if identity sync is enabled and there are identity columns
-        if (options.SyncIdentity && identityColumns?.Count > 0)
+        if (options.IdentityOutput && identityColumns?.Count > 0)
         {
             sql.Append("OUTPUT source.[__RowIndex]");
 
