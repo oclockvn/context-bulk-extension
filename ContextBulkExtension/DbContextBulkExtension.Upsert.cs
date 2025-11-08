@@ -24,7 +24,7 @@ public static partial class DbContextBulkExtensionUpsert
     /// <param name="cancellationToken">The cancellation token</param>
     /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity has no primary key (and matchOn is null), entity type is not part of the model, or database provider is not SQL Server</exception>
-    public static async Task BulkUpsertAsync<T>(this DbContext context, IEnumerable<T> entities, System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null, System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null, BulkUpsertOptions? options = null, CancellationToken cancellationToken = default) where T : class
+    public static async Task BulkUpsertAsync<T>(this DbContext context, IList<T> entities, System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null, System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null, BulkUpsertOptions? options = null, CancellationToken cancellationToken = default) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
@@ -32,7 +32,7 @@ public static partial class DbContextBulkExtensionUpsert
         options ??= new BulkUpsertOptions();
 
         // Early return for empty collections
-        if (entities.TryGetNonEnumeratedCount(out var count) && count == 0)
+        if (entities.Count == 0)
             return;
 
         // Get connection and validate SQL Server
@@ -53,9 +53,7 @@ public static partial class DbContextBulkExtensionUpsert
 
             // Get all columns and map property names to column metadata
             var allColumns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
-            matchColumns = allColumns
-                .Where(c => propertyNames.Contains(c.PropertyInfo.Name))
-                .ToList();
+            matchColumns = [.. allColumns.Where(c => propertyNames.Contains(c.PropertyInfo.Name))];
 
             // Validate all properties were found
             if (matchColumns.Count != propertyNames.Count)
@@ -118,11 +116,13 @@ public static partial class DbContextBulkExtensionUpsert
             {
                 // Step 2: Bulk insert to temp table (always with KeepIdentity for temp table)
                 var bulkCopyOptions = SqlBulkCopyOptions.KeepIdentity;
+                
+                if (options.UseTableLock)
+                    bulkCopyOptions |= SqlBulkCopyOptions.TableLock;
 
                 if (options.CheckConstraints)
                     bulkCopyOptions |= SqlBulkCopyOptions.CheckConstraints;
 
-                // Don't use table lock on temp tables (not necessary and can cause issues)
                 using var bulkCopy = new SqlBulkCopy(connection, bulkCopyOptions, sqlTransaction)
                 {
                     DestinationTableName = tempTableName,
@@ -142,11 +142,8 @@ public static partial class DbContextBulkExtensionUpsert
                     bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
                 }
 
-                // Materialize entities to IList for efficient indexed access in EntityDataReader
-                var entitiesList = entities as IList<T> ?? entities.ToList();
-
                 // Bulk insert to temp table
-                using var reader = new EntityDataReader<T>(entitiesList, columns, needsIdentitySync);
+                using var reader = new EntityDataReader<T>([.. entities], columns, needsIdentitySync);
                 await bulkCopy.WriteToServerAsync(reader, cancellationToken);
 
                 // Step 3: Extract update column names from expression (if provided)
@@ -188,7 +185,7 @@ public static partial class DbContextBulkExtensionUpsert
                         // UPDATE: existing records get their identity synced (useful when matching on non-identity columns)
                         if (action == BulkOperationConstants.MergeActionInsert || action == BulkOperationConstants.MergeActionUpdate)
                         {
-                            var entity = entitiesList[rowIndex];
+                            var entity = entities[rowIndex];
 
                             // Set each identity column value (starting at index 1, after rowIndex)
                             for (int i = 0; i < identityColumns!.Count; i++)
