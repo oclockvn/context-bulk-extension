@@ -69,7 +69,7 @@ internal class EntityDataReader<T>(IList<T> entities, IReadOnlyList<ColumnMetada
             throw new InvalidOperationException("No current row");
 
         EnsureRowValuesLoaded();
-        return _currentRowValues![ordinal];
+        return _currentRowValues![ordinal]!;
     }
 
     public override string GetName(int ordinal)
