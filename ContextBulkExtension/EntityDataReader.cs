@@ -10,9 +10,31 @@ namespace ContextBulkExtension;
 internal class EntityDataReader<T>(IList<T> entities, IReadOnlyList<ColumnMetadata> columns, bool includeRowIndex = false) : DbDataReader where T : class
 {
     private readonly IList<T> _entities = entities;
+    private readonly Dictionary<string, int> _ordinalCache = BuildOrdinalCache(columns, includeRowIndex);
     private int _currentRowIndex = -1;
     private bool _disposed;
     private object?[]? _currentRowValues;
+
+    /// <summary>
+    /// Builds a dictionary cache for O(1) column name to ordinal lookups.
+    /// </summary>
+    private static Dictionary<string, int> BuildOrdinalCache(IReadOnlyList<ColumnMetadata> columns, bool includeRowIndex)
+    {
+        var cache = new Dictionary<string, int>(
+            includeRowIndex ? columns.Count + 1 : columns.Count,
+            StringComparer.OrdinalIgnoreCase);
+
+        if (includeRowIndex)
+            cache[BulkOperationConstants.RowIndexColumnName] = 0;
+
+        var startIndex = includeRowIndex ? 1 : 0;
+        for (int i = 0; i < columns.Count; i++)
+        {
+            cache[columns[i].ColumnName] = i + startIndex;
+        }
+
+        return cache;
+    }
 
     public override int FieldCount => includeRowIndex ? columns.Count + 1 : columns.Count;
 
@@ -83,15 +105,9 @@ internal class EntityDataReader<T>(IList<T> entities, IReadOnlyList<ColumnMetada
 
     public override int GetOrdinal(string name)
     {
-        if (includeRowIndex && name.Equals(BulkOperationConstants.RowIndexColumnName, StringComparison.OrdinalIgnoreCase))
-            return 0;
+        if (_ordinalCache.TryGetValue(name, out var ordinal))
+            return ordinal;
 
-        var startIndex = includeRowIndex ? 1 : 0;
-        for (int i = 0; i < columns.Count; i++)
-        {
-            if (columns[i].ColumnName.Equals(name, StringComparison.OrdinalIgnoreCase))
-                return i + startIndex;
-        }
         throw new IndexOutOfRangeException($"Column '{name}' not found");
     }
 
@@ -116,8 +132,9 @@ internal class EntityDataReader<T>(IList<T> entities, IReadOnlyList<ColumnMetada
     public override bool IsDBNull(int ordinal)
     {
         EnsureRowValuesLoaded();
-        var value = _currentRowValues![ordinal];
-        return value == null || value == DBNull.Value;
+        // Use pattern matching for more efficient null check
+        // Note: Must check both null and DBNull to maintain semantics
+        return _currentRowValues![ordinal] is null or DBNull;
     }
 
     public override bool GetBoolean(int ordinal) => (bool)GetValue(ordinal);

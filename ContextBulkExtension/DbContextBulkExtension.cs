@@ -166,12 +166,16 @@ public static partial class DbContextBulkExtensionUpsert
 
             // Get all columns and map property names to column metadata
             var allColumns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
-            matchColumns = [.. allColumns.Where(c => propertyNames.Contains(c.PropertyInfo.Name))];
+
+            // Use HashSet for O(1) lookup instead of O(n) List.Contains
+            var propertyNamesSet = new HashSet<string>(propertyNames, StringComparer.OrdinalIgnoreCase);
+            matchColumns = allColumns.Where(c => propertyNamesSet.Contains(c.PropertyInfo.Name)).ToList();
 
             // Validate all properties were found
             if (matchColumns.Count != propertyNames.Count)
             {
-                var missing = propertyNames.Except(matchColumns.Select(c => c.PropertyInfo.Name));
+                var foundNames = new HashSet<string>(matchColumns.Select(c => c.PropertyInfo.Name), StringComparer.OrdinalIgnoreCase);
+                var missing = propertyNames.Where(p => !foundNames.Contains(p));
                 throw new InvalidOperationException(
                     $"Properties not found in entity metadata: {string.Join(", ", missing)}. " +
                     "Ensure the properties are mapped to database columns.");
@@ -256,7 +260,7 @@ public static partial class DbContextBulkExtensionUpsert
                 }
 
                 // Bulk insert to temp table
-                using var reader = new EntityDataReader<T>([.. entities], columns, needsIdentitySync);
+                using var reader = new EntityDataReader<T>(entities, columns, needsIdentitySync);
                 await bulkCopy.WriteToServerAsync(reader, cancellationToken);
 
                 // Step 3: Extract update column names from expression (if provided)
@@ -344,7 +348,10 @@ public static partial class DbContextBulkExtensionUpsert
     /// </summary>
     private static string BuildCreateTempTableSql(string tempTableName, IReadOnlyList<ColumnMetadata> columns, bool includeRowIndex = false)
     {
-        var sql = new StringBuilder();
+        // Pre-allocate StringBuilder capacity to avoid reallocations
+        // Estimate: ~100 chars base + ~50 chars per column (column name + type + brackets/commas)
+        var estimatedSize = 100 + (columns.Count * 50);
+        var sql = new StringBuilder(estimatedSize);
         sql.AppendLine($"CREATE TABLE {tempTableName} (");
 
         // Add row index column as first column if requested
@@ -380,7 +387,10 @@ public static partial class DbContextBulkExtensionUpsert
         BulkUpsertOptions options,
         IReadOnlyList<ColumnMetadata>? identityColumns = null)
     {
-        var sql = new StringBuilder();
+        // Pre-allocate StringBuilder capacity to avoid reallocations
+        // Estimate: ~200 chars base + ~100 chars per column (MERGE has UPDATE SET and INSERT clauses)
+        var estimatedSize = 200 + (columns.Count * 100);
+        var sql = new StringBuilder(estimatedSize);
 
         // MERGE statement header
         sql.AppendLine($"MERGE {targetTableName} AS target");
@@ -400,14 +410,20 @@ public static partial class DbContextBulkExtensionUpsert
         if (!options.InsertOnly)
         {
             // Determine which columns to update (exclude identity columns and match columns)
+            // Use HashSet for O(1) lookup instead of O(m) Any() per column
+            var matchKeyColumnNames = new HashSet<string>(
+                matchKeyColumns.Select(pk => pk.ColumnName),
+                StringComparer.OrdinalIgnoreCase);
+
             var updateColumns = columns
-                .Where(c => !c.IsIdentity && !matchKeyColumns.Any(pk => pk.ColumnName.Equals(c.ColumnName, StringComparison.OrdinalIgnoreCase)))
+                .Where(c => !c.IsIdentity && !matchKeyColumnNames.Contains(c.ColumnName))
                 .ToList();
 
             // If updateColumnNames is specified, filter to only those columns
             if (updateColumnNames?.Count > 0)
             {
-                updateColumns = [.. updateColumns.Where(c => updateColumnNames.Contains(c.PropertyInfo.Name, StringComparer.OrdinalIgnoreCase))];
+                var updateNamesSet = new HashSet<string>(updateColumnNames, StringComparer.OrdinalIgnoreCase);
+                updateColumns = updateColumns.Where(c => updateNamesSet.Contains(c.PropertyInfo.Name)).ToList();
             }
 
             if (updateColumns.Count > 0)
