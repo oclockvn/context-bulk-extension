@@ -142,8 +142,11 @@ public static partial class DbContextBulkExtensionUpsert
                     bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
                 }
 
+                // Materialize entities to IList for efficient indexed access in EntityDataReader
+                var entitiesList = entities as IList<T> ?? entities.ToList();
+
                 // Bulk insert to temp table
-                using var reader = new EntityDataReader<T>(entities, columns, needsIdentitySync);
+                using var reader = new EntityDataReader<T>(entitiesList, columns, needsIdentitySync);
                 await bulkCopy.WriteToServerAsync(reader, cancellationToken);
 
                 // Step 3: Extract update column names from expression (if provided)
@@ -171,9 +174,7 @@ public static partial class DbContextBulkExtensionUpsert
                 // If identity sync is enabled, read OUTPUT results and sync back to entities
                 if (needsIdentitySync)
                 {
-                    // Convert entities to list to access by index
-                    var entitiesList = entities as IList<T> ?? [.. entities];
-
+                    // entitiesList already materialized above
                     using var outputReader = await mergeCmd.ExecuteReaderAsync(cancellationToken);
 
                     // Read OUTPUT results and sync identity values back to entities

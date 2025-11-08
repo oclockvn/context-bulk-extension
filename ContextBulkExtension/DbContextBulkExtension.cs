@@ -102,8 +102,11 @@ public static class DbContextBulkExtension
                 bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
             }
 
+            // Materialize entities to IList for efficient indexed access in EntityDataReader
+            var entitiesList = entities as IList<T> ?? entities.ToList();
+
             // Create data reader and perform bulk insert
-            using var reader = new EntityDataReader<T>(entities, columns);
+            using var reader = new EntityDataReader<T>(entitiesList, columns);
             await bulkCopy.WriteToServerAsync(reader, cancellationToken);
         }
         catch (SqlException ex)
