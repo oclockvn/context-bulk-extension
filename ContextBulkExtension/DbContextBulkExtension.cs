@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Data.SqlClient;
 using System.Data;
+using System.Diagnostics;
 
 namespace ContextBulkExtension;
 
@@ -20,7 +21,7 @@ public static class DbContextBulkExtension
     /// <param name="cancellationToken">The cancellation token</param>
     /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity type is not part of the model or database provider is not SQL Server</exception>
-    public static async Task BulkInsertAsync<T>(this DbContext context, IEnumerable<T> entities, CancellationToken cancellationToken = default) where T : class
+    public static async Task BulkInsertAsync<T>(this DbContext context, IList<T> entities, CancellationToken cancellationToken = default) where T : class
     {
         await BulkInsertAsync(context, entities, new BulkInsertOptions(), cancellationToken);
     }
@@ -36,14 +37,14 @@ public static class DbContextBulkExtension
     /// <param name="cancellationToken">The cancellation token</param>
     /// <exception cref="ArgumentNullException">Thrown when context, entities, or options is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity type is not part of the model or database provider is not SQL Server</exception>
-    public static async Task BulkInsertAsync<T>(this DbContext context, IEnumerable<T> entities, BulkInsertOptions options, CancellationToken cancellationToken = default) where T : class
+    public static async Task BulkInsertAsync<T>(this DbContext context, IList<T> entities, BulkInsertOptions options, CancellationToken cancellationToken = default) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(options);
 
         // Early return for empty collections
-        if (entities.TryGetNonEnumeratedCount(out var count) && count == 0)
+        if (entities.Count == 0)
             return;
 
         // Get connection and validate SQL Server
@@ -95,6 +96,8 @@ public static class DbContextBulkExtension
                 BulkCopyTimeout = options.TimeoutSeconds,
                 EnableStreaming = options.EnableStreaming
             };
+            
+            Debug.WriteLine($"[BULK] BulkInsertAsync inserting {entities.Count} entities into {tableName} with {columns.Count} columns");
 
             // Map columns
             foreach (var column in columns)
@@ -102,11 +105,8 @@ public static class DbContextBulkExtension
                 bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
             }
 
-            // Materialize entities to IList for efficient indexed access in EntityDataReader
-            var entitiesList = entities as IList<T> ?? entities.ToList();
-
             // Create data reader and perform bulk insert
-            using var reader = new EntityDataReader<T>(entitiesList, columns);
+            using var reader = new EntityDataReader<T>(entities, columns);
             await bulkCopy.WriteToServerAsync(reader, cancellationToken);
         }
         catch (SqlException ex)

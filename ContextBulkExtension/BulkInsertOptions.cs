@@ -1,11 +1,9 @@
-using System.Data;
-
 namespace ContextBulkExtension;
 
 /// <summary>
 /// Configuration options for bulk insert operations.
 /// </summary>
-public class BulkInsertOptions
+public record BulkInsertOptions
 {
     /// <summary>
     /// Number of rows in each batch. Default is 10,000.

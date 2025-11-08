@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Data.SqlClient;
 using System.Data;
 using System.Text;
+using System.Diagnostics;
 
 namespace ContextBulkExtension;
 
@@ -24,7 +25,13 @@ public static partial class DbContextBulkExtensionUpsert
     /// <param name="cancellationToken">The cancellation token</param>
     /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity has no primary key (and matchOn is null), entity type is not part of the model, or database provider is not SQL Server</exception>
-    public static async Task BulkUpsertAsync<T>(this DbContext context, IList<T> entities, System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null, System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null, BulkUpsertOptions? options = null, CancellationToken cancellationToken = default) where T : class
+    public static async Task BulkUpsertAsync<T>(
+        this DbContext context,
+        IList<T> entities,
+        System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null,
+        System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null,
+        BulkUpsertOptions? options = null,
+        CancellationToken cancellationToken = default) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
@@ -116,7 +123,7 @@ public static partial class DbContextBulkExtensionUpsert
             {
                 // Step 2: Bulk insert to temp table (always with KeepIdentity for temp table)
                 var bulkCopyOptions = SqlBulkCopyOptions.KeepIdentity;
-                
+
                 if (options.UseTableLock)
                     bulkCopyOptions |= SqlBulkCopyOptions.TableLock;
 
@@ -157,13 +164,12 @@ public static partial class DbContextBulkExtensionUpsert
                 var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, updateColumnNames, options, identityColumns);
 
                 // Debug: Print generated SQL
-                #if DEBUG
-                System.Diagnostics.Debug.WriteLine("=== GENERATED MERGE SQL ===");
-                System.Diagnostics.Debug.WriteLine(mergeSql);
-                System.Diagnostics.Debug.WriteLine($"InsertOnly: {options.InsertOnly}");
-                System.Diagnostics.Debug.WriteLine($"SyncIdentity: {options.IdentityOutput}");
-                System.Diagnostics.Debug.WriteLine("=========================");
-                #endif
+#if DEBUG
+                Debug.WriteLine("=== GENERATED MERGE SQL ===");
+                Debug.WriteLine($"[BULK] BulkUpsertAsync merging {entities.Count} entities into {tableName} with {columns.Count} columns, options: {options}");
+                Debug.WriteLine(mergeSql);
+                Debug.WriteLine("=========================");
+#endif
 
                 using var mergeCmd = new SqlCommand(mergeSql, connection, sqlTransaction);
                 mergeCmd.CommandTimeout = options.TimeoutSeconds;
