@@ -176,9 +176,7 @@ public static partial class DbContextBulkExtensionUpsert
             {
                 var foundNames = new HashSet<string>(matchColumns.Select(c => c.PropertyInfo.Name), StringComparer.OrdinalIgnoreCase);
                 var missing = propertyNames.Where(p => !foundNames.Contains(p));
-                throw new InvalidOperationException(
-                    $"Properties not found in entity metadata: {string.Join(", ", missing)}. " +
-                    "Ensure the properties are mapped to database columns.");
+                throw new InvalidOperationException($"Properties not found in entity metadata: {string.Join(", ", missing)}.");
             }
         }
         else
@@ -188,9 +186,7 @@ public static partial class DbContextBulkExtensionUpsert
 
             if (matchColumns.Count == 0)
             {
-                throw new InvalidOperationException(
-                    $"Entity type '{typeof(T).Name}' has no primary key defined. " +
-                    "Either define a primary key or use matchOn parameter to specify custom match columns.");
+                throw new InvalidOperationException($"Entity type '{typeof(T).Name}' has no primary key defined. Either define a primary key or use matchOn parameter to specify custom match columns.");
             }
         }
 
@@ -337,9 +333,7 @@ public static partial class DbContextBulkExtensionUpsert
         }
         catch (SqlException ex)
         {
-            throw new InvalidOperationException(
-                $"Bulk upsert failed for entity type '{typeof(T).Name}'. " +
-                $"Error: {ex.Message}", ex);
+            throw new InvalidOperationException($"Bulk upsert failed for entity type '{typeof(T).Name}'. Error: {ex.Message}", ex);
         }
     }
 
@@ -529,9 +523,7 @@ public static partial class DbContextBulkExtensionUpsert
 
         if (propertyNames.Count == 0)
         {
-            throw new ArgumentException(
-                "Invalid MatchOn expression. Use either a single property (x => x.Email) " +
-                "or anonymous type (x => new { x.Email, x.Username }).");
+            throw new ArgumentException("Invalid MatchOn expression. Use either a single property (x => x.Email) or anonymous type (x => new { x.Email, x.Username }).");
         }
 
         return propertyNames;
