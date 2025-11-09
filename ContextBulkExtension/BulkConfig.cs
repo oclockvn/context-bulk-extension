@@ -1,9 +1,9 @@
 namespace ContextBulkExtension;
 
 /// <summary>
-/// Configuration options for bulk insert operations.
+/// Configuration options for bulk operations.
 /// </summary>
-public record BulkInsertOptions
+public record BulkConfig
 {
     /// <summary>
     /// Number of rows in each batch. Default is 10,000.
@@ -35,4 +35,21 @@ public record BulkInsertOptions
     /// Note: Set to false for memory-optimized tables (In-Memory OLTP).
     /// </summary>
     public bool UseTableLock { get; set; } = true;
+
+    /// <summary>
+    /// When true, only inserts new records and skips updates for existing records.
+    /// Default is false (performs both insert and update operations).
+    /// Use this when you use BulkUpsertAsync but doesn't want to update existing records.
+    /// </summary>
+    public bool InsertOnly { get; set; } = false;
+
+    /// <summary>
+    /// When true, syncs identity values back to the original entities after upsert operation.
+    /// This is useful when matching on non-identity columns (e.g., Email, Username) and you need the identity values populated.
+    /// - INSERT: Syncs newly generated identity values
+    /// - UPDATE: Syncs existing identity values from database to entities
+    /// Adds ~10-20% overhead for tracking and mapping identity values.
+    /// Default is false (no identity synchronization).
+    /// </summary>
+    public bool IdentityOutput { get; set; } = false;
 }
