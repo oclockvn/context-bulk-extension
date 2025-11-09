@@ -4,6 +4,7 @@ using Microsoft.Data.SqlClient;
 using System.Data;
 using System.Text;
 using System.Diagnostics;
+using ContextBulkExtension.Helpers;
 
 namespace ContextBulkExtension;
 

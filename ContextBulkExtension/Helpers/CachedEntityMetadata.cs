@@ -1,4 +1,4 @@
-namespace ContextBulkExtension;
+namespace ContextBulkExtension.Helpers;
 
 /// <summary>
 /// Cached metadata for an entity type to improve performance.
