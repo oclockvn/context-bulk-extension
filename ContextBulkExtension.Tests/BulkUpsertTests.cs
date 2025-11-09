@@ -230,7 +230,7 @@ public class BulkUpsertTests : IAsyncLifetime
             entity.Value = 999;
         }
 
-        var options = new BulkUpsertOptions { InsertOnly = true };
+        var options = new BulkConfig { InsertOnly = true };
 
         // Act - Use fresh context for upsert
         await using (var context2 = _fixture.CreateNewContext())
@@ -647,7 +647,7 @@ public class BulkUpsertTests : IAsyncLifetime
             new() { Email = "user2@test.com", Username = "user2", FirstName = "New", LastName = "User", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow } // Should be inserted
         };
 
-        var options = new BulkUpsertOptions { InsertOnly = true };
+        var options = new BulkConfig { InsertOnly = true };
 
         // Act - Match on Email with InsertOnly
         await using (var context = _fixture.CreateNewContext())
@@ -919,7 +919,7 @@ public class BulkUpsertTests : IAsyncLifetime
             })
             .ToList();
 
-        var options = new BulkUpsertOptions { IdentityOutput = true };
+        var options = new BulkConfig { IdentityOutput = true };
 
         // Act
         await using var context = _fixture.CreateNewContext();
@@ -953,7 +953,7 @@ public class BulkUpsertTests : IAsyncLifetime
             })
             .ToList();
 
-        var options = new BulkUpsertOptions { IdentityOutput = false };
+        var options = new BulkConfig { IdentityOutput = false };
 
         // Act
         await using var context = _fixture.CreateNewContext();
@@ -1006,7 +1006,7 @@ public class BulkUpsertTests : IAsyncLifetime
 
         var allEntities = existingEntities.Concat(newEntities).ToList();
 
-        var options = new BulkUpsertOptions { IdentityOutput = true };
+        var options = new BulkConfig { IdentityOutput = true };
 
         // Act
         await using (var context = _fixture.CreateNewContext())
@@ -1051,7 +1051,7 @@ public class BulkUpsertTests : IAsyncLifetime
             new() { Email = "user4@test.com", Username = "user4", FirstName = "Another", LastName = "New", Points = 400, IsActive = true, RegisteredAt = DateTime.UtcNow } // Insert
         };
 
-        var options = new BulkUpsertOptions { IdentityOutput = true };
+        var options = new BulkConfig { IdentityOutput = true };
 
         // Act
         await using (var context = _fixture.CreateNewContext())
@@ -1098,7 +1098,7 @@ public class BulkUpsertTests : IAsyncLifetime
             new() { Key1 = 4, Key2 = "D", Data = "New Data D", Counter = 400 } // Insert
         };
 
-        var options = new BulkUpsertOptions { IdentityOutput = true };
+        var options = new BulkConfig { IdentityOutput = true };
 
         // Act - Note: CompositeKeyEntity may not have identity columns
         // This test verifies that IdentityOutput doesn't break when there are no identity columns
@@ -1129,7 +1129,7 @@ public class BulkUpsertTests : IAsyncLifetime
             })
             .ToList();
 
-        var options = new BulkUpsertOptions { IdentityOutput = true };
+        var options = new BulkConfig { IdentityOutput = true };
 
         // Act
         await using var context = _fixture.CreateNewContext();
@@ -1166,7 +1166,7 @@ public class BulkUpsertTests : IAsyncLifetime
             new() { Email = "user2@test.com", Username = "user2", FirstName = "New", LastName = "User", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow } // Should be inserted
         };
 
-        var options = new BulkUpsertOptions { InsertOnly = true, IdentityOutput = true };
+        var options = new BulkConfig { InsertOnly = true, IdentityOutput = true };
 
         // Act
         await using (var context = _fixture.CreateNewContext())
@@ -1213,7 +1213,7 @@ public class BulkUpsertTests : IAsyncLifetime
         // Verify IDs are not set initially (default to 0)
         Assert.All(updateUsers, u => Assert.Equal(0, u.Id));
 
-        var options = new BulkUpsertOptions { IdentityOutput = true };
+        var options = new BulkConfig { IdentityOutput = true };
 
         // Act - Match on Email, should update existing records and sync their IDs back
         await using (var context = _fixture.CreateNewContext())
@@ -1270,7 +1270,7 @@ public class BulkUpsertTests : IAsyncLifetime
 
         Assert.All(mixedUsers, u => Assert.Equal(0, u.Id));
 
-        var options = new BulkUpsertOptions { IdentityOutput = true };
+        var options = new BulkConfig { IdentityOutput = true };
 
         // Act
         await using (var context = _fixture.CreateNewContext())

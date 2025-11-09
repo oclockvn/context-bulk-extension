@@ -36,6 +36,24 @@
                 "${workspaceFolder}/ContextBulkExtension.Tests/ContextBulkExtension.Tests.csproj"
             ],
             "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "test all",
+            "detail": "Test all tests in the project",
+            "type": "process",
+            "command": "dotnet",
+            "args": [
+                "test",
+                "${workspaceFolder}/ContextBulkExtension.Tests/ContextBulkExtension.Tests.csproj"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "push current",
+            "detail": "Push the current branch to the remote repository",
+            "type": "shell",
+            "command": "git push origin $(git branch --show-current)",
+            "problemMatcher": []
         }
     ]
 }

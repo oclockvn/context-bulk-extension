@@ -1,4 +1,4 @@
-namespace ContextBulkExtension;
+namespace ContextBulkExtension.Helpers;
 
 /// <summary>
 /// Metadata for a column mapping.

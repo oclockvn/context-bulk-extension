@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using System.Collections.Concurrent;
 using System.Linq.Expressions;
 
-namespace ContextBulkExtension;
+namespace ContextBulkExtension.Helpers;
 
 /// <summary>
 /// Helper class for extracting entity metadata from EF Core model.

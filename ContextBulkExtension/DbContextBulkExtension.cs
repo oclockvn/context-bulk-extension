@@ -4,6 +4,7 @@ using Microsoft.Data.SqlClient;
 using System.Data;
 using System.Text;
 using System.Diagnostics;
+using ContextBulkExtension.Helpers;
 
 namespace ContextBulkExtension;
 
@@ -24,7 +25,7 @@ public static partial class DbContextBulkExtensionUpsert
     /// <exception cref="InvalidOperationException">Thrown when entity type is not part of the model or database provider is not SQL Server</exception>
     public static async Task BulkInsertAsync<T>(this DbContext context, IList<T> entities, CancellationToken cancellationToken = default) where T : class
     {
-        await BulkInsertAsync(context, entities, new BulkInsertOptions(), cancellationToken);
+        await BulkInsertAsync(context, entities, new BulkConfig(), cancellationToken);
     }
 
     /// <summary>
@@ -38,7 +39,7 @@ public static partial class DbContextBulkExtensionUpsert
     /// <param name="cancellationToken">The cancellation token</param>
     /// <exception cref="ArgumentNullException">Thrown when context, entities, or options is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity type is not part of the model or database provider is not SQL Server</exception>
-    public static async Task BulkInsertAsync<T>(this DbContext context, IList<T> entities, BulkInsertOptions options, CancellationToken cancellationToken = default) where T : class
+    public static async Task BulkInsertAsync<T>(this DbContext context, IList<T> entities, BulkConfig options, CancellationToken cancellationToken = default) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
@@ -136,13 +137,13 @@ public static partial class DbContextBulkExtensionUpsert
         IList<T> entities,
         System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null,
         System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null,
-        BulkUpsertOptions? options = null,
+        BulkConfig? options = null,
         CancellationToken cancellationToken = default) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
 
-        options ??= new BulkUpsertOptions();
+        options ??= new BulkConfig();
 
         // Early return for empty collections
         if (entities.Count == 0)
@@ -378,7 +379,7 @@ public static partial class DbContextBulkExtensionUpsert
         IReadOnlyList<ColumnMetadata> columns,
         IReadOnlyList<ColumnMetadata> matchKeyColumns,
         List<string>? updateColumnNames,
-        BulkUpsertOptions options,
+        BulkConfig options,
         IReadOnlyList<ColumnMetadata>? identityColumns = null)
     {
         // Pre-allocate StringBuilder capacity to avoid reallocations

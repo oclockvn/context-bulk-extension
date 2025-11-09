@@ -98,7 +98,7 @@ public class BulkInsertTests : IAsyncLifetime
             })
             .ToList();
 
-        var options = new BulkInsertOptions { BatchSize = 500 };
+        var options = new BulkConfig { BatchSize = 500 };
 
         // Act
         await using var context = _fixture.CreateNewContext();
@@ -242,7 +242,7 @@ public class BulkInsertTests : IAsyncLifetime
             })
             .ToList();
 
-        var options = new BulkInsertOptions { CheckConstraints = false };
+        var options = new BulkConfig { CheckConstraints = false };
 
         // Act
         await using var context = _fixture.CreateNewContext();
@@ -266,7 +266,7 @@ public class BulkInsertTests : IAsyncLifetime
             })
             .ToList();
 
-        var options = new BulkInsertOptions { UseTableLock = false };
+        var options = new BulkConfig { UseTableLock = false };
 
         // Act
         await using var context = _fixture.CreateNewContext();

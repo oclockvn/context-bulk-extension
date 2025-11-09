@@ -1,7 +1,7 @@
 using System.Collections;
 using System.Data.Common;
 
-namespace ContextBulkExtension;
+namespace ContextBulkExtension.Helpers;
 
 /// <summary>
 /// Memory-efficient IDataReader implementation for streaming entities to SqlBulkCopy.
