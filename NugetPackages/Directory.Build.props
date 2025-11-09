@@ -1,0 +1,93 @@
+<Project>
+    <PropertyGroup>
+        <Title>ContextBulkExtension</Title>
+        <BasePackageId>ContextBulkExtension</BasePackageId>
+        <PackageId>$(BasePackageId)</PackageId>
+        <BaseVersion>0.20</BaseVersion>
+        <Nullable>enable</Nullable>
+        <Authors>oclockvn</Authors>
+        <Description>High-performance bulk operations for Entity Framework Core using SQL Server's SqlBulkCopy. Designed for efficiently inserting millions of records.</Description>
+        <PackageProjectUrl>https://github.com/oclockvn/ContextBulkExtension</PackageProjectUrl>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <PackageTags>EntityFrameworkCore Entity Framework Core EFCore EF Core SQL Server Bulk Batch Extensions Insert Update Delete</PackageTags>
+        <RepositoryUrl>https://github.com/oclockvn/ContextBulkExtension</RepositoryUrl>
+        <RepositoryType>Git</RepositoryType>
+        <AllowedOutputExtensionsInPackageBuildOutputFolder>$(AllowedOutputExtensionsInPackageBuildOutputFolder);.pdb</AllowedOutputExtensionsInPackageBuildOutputFolder>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <LangVersion>latest</LangVersion>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <NoWarn>$(NoWarn);CS1591</NoWarn>
+    </PropertyGroup>
+    
+    <Choose>
+        <When Condition="$(MSBuildProjectName.Contains('v8'))">
+            <PropertyGroup>
+                <Version>8.$(BaseVersion)</Version>
+                <TargetFramework>net8.0</TargetFramework>
+                <DefineConstants>$(DefineConstants);V8</DefineConstants>
+                <AssemblyVersion>8.$(BaseVersion).0</AssemblyVersion>
+                <FileVersion>8.$(BaseVersion).0</FileVersion>
+            </PropertyGroup>
+        </When>
+        <When Condition="$(MSBuildProjectName.Contains('v9'))">
+            <PropertyGroup>
+                <Version>9.$(BaseVersion)</Version>
+                <TargetFramework>net9.0</TargetFramework>
+                <DefineConstants>$(DefineConstants);V9</DefineConstants>
+                <AssemblyVersion>9.$(BaseVersion).0</AssemblyVersion>
+                <FileVersion>9.$(BaseVersion).0</FileVersion>
+            </PropertyGroup>
+        </When>
+        <Otherwise>
+        </Otherwise>
+    </Choose>
+
+    <!-- Conditional PackageId generation based on provider and version -->
+    <Choose>
+        <When Condition="$(MSBuildProjectName.Contains('SqlServer'))">
+            <PropertyGroup>
+                <Title>$(Title).SqlServer</Title>
+                <PackageId>$(BasePackageId).SqlServer</PackageId>
+            </PropertyGroup>
+        </When>
+        <When Condition="$(MSBuildProjectName.Contains('Postgres'))">
+            <PropertyGroup>
+                <Title>$(Title).Postgres</Title>
+                <PackageId>$(BasePackageId).Postgres</PackageId>
+            </PropertyGroup>
+        </When>
+        <Otherwise>
+        </Otherwise>
+    </Choose>
+
+    <!-- Append version suffix to PackageId -->
+    <PropertyGroup Condition="$(MSBuildProjectName.Contains('v8'))">
+        <PackageId>$(PackageId).v8</PackageId>
+    </PropertyGroup>
+    <PropertyGroup Condition="$(MSBuildProjectName.Contains('v9'))">
+        <PackageId>$(PackageId).v9</PackageId>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <EnablePackageValidation>true</EnablePackageValidation>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\README.md" PackagePath="" Pack="True"/>
+        <Content Include="..\LICENSE" Link="LICENSE" Pack="true" PackagePath="LICENSE"/>
+    </ItemGroup>
+
+    <!-- Exclude test files if any are included -->
+    <ItemGroup>
+        <Compile Remove="..\**\*Tests.cs" />
+        <Compile Remove="..\**\*Test.cs" />
+        <Compile Remove="..\**\TestEntities\**" />
+        <Compile Remove="..\**\Fixtures\**" />
+    </ItemGroup>
+
+</Project>
+
