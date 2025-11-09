@@ -32,20 +32,49 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          global-json-file: './global.json'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
 
       - name: Determine version
         id: version
         run: |
+          set -e
+          
+          # Extract version from tag or input
           if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
             VERSION="${{ github.event.inputs.version }}"
           else
-            VERSION=$(echo "${{ github.ref }}" | sed 's/refs\/tags\/v//')
+            # Handle both v8.1.0 and 8.1.0 tag formats
+            TAG_VERSION=$(echo "${{ github.ref }}" | sed 's/refs\/tags\/v\?//')
+            VERSION="$TAG_VERSION"
           fi
+          
+          # Validate semantic version format (X.Y.Z)
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: Invalid version format: $VERSION"
+            echo "Expected format: X.Y.Z (e.g., 8.1.0)"
+            exit 1
+          fi
+          
+          # Extract BaseVersion (everything after major version)
+          BaseVersion=$(echo "$VERSION" | cut -d. -f2-)
+          
+          if [ -z "$BaseVersion" ]; then
+            echo "Error: Failed to extract BaseVersion from $VERSION"
+            exit 1
+          fi
+          
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "BaseVersion=$(echo $VERSION | cut -d. -f2-)" >> $GITHUB_OUTPUT
+          echo "BaseVersion=$BaseVersion" >> $GITHUB_OUTPUT
           echo "Determined version: $VERSION"
-          echo "BaseVersion: $(echo $VERSION | cut -d. -f2-)"
+          echo "BaseVersion: $BaseVersion"
 
       - name: Build project
         run: |
@@ -62,6 +91,25 @@ jobs:
             --output ./artifacts \
             -p:BaseVersion=${{ steps.version.outputs.BaseVersion }}
 
+      - name: Validate package
+        run: |
+          for nupkg in ./artifacts/*.nupkg; do
+            if [ -f "$nupkg" ]; then
+              echo "Validating package: $nupkg"
+              dotnet nuget verify "$nupkg" --all || {
+                echo "Error: Package validation failed for $nupkg"
+                exit 1
+              }
+            fi
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: ./artifacts/*.nupkg
+          retention-days: 30
+
       - name: NuGet login (OIDC → temp API key)
         uses: NuGet/login@v1
         id: login
@@ -74,4 +122,23 @@ jobs:
             --api-key ${{ steps.login.outputs.NUGET_API_KEY }} \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
+
+      - name: Generate job summary
+        run: |
+          PACKAGE_NAME="${{ matrix.package }}"
+          PACKAGE_VERSION="${{ steps.version.outputs.version }}"
+          NUGET_URL="https://www.nuget.org/packages/${PACKAGE_NAME}/${PACKAGE_VERSION}"
+          
+          {
+            echo "## 📦 Published NuGet Package"
+            echo ""
+            echo "**Package:** \`${PACKAGE_NAME}\`"
+            echo "**Version:** \`${PACKAGE_VERSION}\`"
+            echo "**NuGet.org:** [View Package](${NUGET_URL})"
+            echo ""
+            echo "### Package Details"
+            echo "- Package ID: \`${PACKAGE_NAME}\`"
+            echo "- Version: \`${PACKAGE_VERSION}\`"
+            echo "- Published: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          } >> $GITHUB_STEP_SUMMARY
 
