@@ -1,0 +1,77 @@
+name: Publish NuGet Package
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 1.0.0)'
+        required: false
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    
+    strategy:
+      matrix:
+        package:
+          - ContextBulkExtension.SqlServer.v8
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=$(echo "${{ github.ref }}" | sed 's/refs\/tags\/v//')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "BaseVersion=$(echo $VERSION | cut -d. -f2-)" >> $GITHUB_OUTPUT
+          echo "Determined version: $VERSION"
+          echo "BaseVersion: $(echo $VERSION | cut -d. -f2-)"
+
+      - name: Build project
+        run: |
+          dotnet build NugetPackages/${{ matrix.package }}.csproj \
+            --configuration Release \
+            --no-incremental \
+            -p:BaseVersion=${{ steps.version.outputs.BaseVersion }}
+
+      - name: Pack NuGet package
+        run: |
+          dotnet pack NugetPackages/${{ matrix.package }}.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./artifacts \
+            -p:BaseVersion=${{ steps.version.outputs.BaseVersion }}
+
+      - name: NuGet login (OIDC → temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: oclockvn
+
+      - name: Push package to NuGet
+        run: |
+          dotnet nuget push ./artifacts/*.nupkg \
+            --api-key ${{ steps.login.outputs.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
