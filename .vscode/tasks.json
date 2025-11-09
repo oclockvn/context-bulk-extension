@@ -1,5 +1,13 @@
 {
     "version": "2.0.0",
+    "inputs": [
+        {
+            "id": "nugetVersion",
+            "description": "Enter the version (format: X.Y.Z, e.g., 8.0.21)",
+            "type": "promptString",
+            "password": false
+        }
+    ],
     "tasks": [
         {
             "label": "build",
@@ -53,6 +61,30 @@
             "detail": "Push the current branch to the remote repository",
             "type": "shell",
             "command": "git push origin $(git branch --show-current)",
+            "problemMatcher": []
+        },
+        {
+            "label": "show base version",
+            "detail": "Show the current BaseVersion from Directory.Build.props",
+            "type": "shell",
+            "command": "pwsh",
+            "args": [
+                "-Command",
+                "$xml = [xml](Get-Content '${workspaceFolder}/NugetPackages/Directory.Build.props'); $baseVersion = $xml.Project.PropertyGroup.BaseVersion; Write-Host \"Current BaseVersion: $baseVersion\" -ForegroundColor Cyan"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "publish nuget",
+            "detail": "Run publish-nuget.ps1 with a new version",
+            "type": "shell",
+            "command": "pwsh",
+            "args": [
+                "-File",
+                "${workspaceFolder}/scripts/publish-nuget.ps1",
+                "-Version",
+                "${input:nugetVersion}"
+            ],
             "problemMatcher": []
         }
     ]
