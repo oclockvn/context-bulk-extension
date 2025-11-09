@@ -48,7 +48,8 @@ Write-Host "`nUpdating BaseVersion in Directory.Build.props..." -ForegroundColor
 $content = Get-Content $DirectoryBuildPropsPath -Raw
 
 # Update BaseVersion property
-$content = $content -replace '(<BaseVersion>)(.*?)(</BaseVersion>)', "`$1$BaseVersion`$3"
+# Use single quotes for literal $1 and $2, and concatenate with the variable
+$content = $content -replace '(<BaseVersion>)(.*?)(</BaseVersion>)', ('<BaseVersion>' + $BaseVersion + '</BaseVersion>')
 
 # Write back to file
 Set-Content -Path $DirectoryBuildPropsPath -Value $content -NoNewline

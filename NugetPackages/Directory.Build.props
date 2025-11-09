@@ -3,7 +3,7 @@
         <Title>ContextBulkExtension</Title>
         <BasePackageId>ContextBulkExtension</BasePackageId>
         <PackageId>$(BasePackageId)</PackageId>
-        <BaseVersion>1.0</BaseVersion>
+        <BaseVersion>0.20</BaseVersion>
         <Nullable>enable</Nullable>
         <Authors>oclockvn</Authors>
         <Description>High-performance bulk operations for Entity Framework Core using SQL Server's SqlBulkCopy. Designed for efficiently inserting millions of records.</Description>
