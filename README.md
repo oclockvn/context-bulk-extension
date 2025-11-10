@@ -6,6 +6,8 @@ High-performance bulk operations for Entity Framework Core using SQL Server's Sq
 
 Install the NuGet package that matches your EF Core version:
 
+[![Downloads](https://img.shields.io/nuget/dt/ContextBulkExtension.SqlServer.v8)](https://www.nuget.org/packages/ContextBulkExtension.SqlServer.v8/)
+
 ```bash
 # For EF Core 8.x
 dotnet add package ContextBulkExtension.SqlServer.v8
