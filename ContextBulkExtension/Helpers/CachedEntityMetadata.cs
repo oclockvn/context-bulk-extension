@@ -28,6 +28,11 @@ internal class CachedEntityMetadata(List<ColumnMetadata> allColumns)
     public IReadOnlyList<ColumnMetadata> PrimaryKeyColumns { get; } = [.. allColumns.Where(c => c.IsPrimaryKey)];
 
     /// <summary>
+    /// Identity column metadata (computed once in constructor).
+    /// </summary>
+    public IReadOnlyList<ColumnMetadata> IdentityColumns { get; } = [.. allColumns.Where(c => c.IsIdentity)];
+
+    /// <summary>
     /// Full table name including schema.
     /// </summary>
     public required string TableName { get; init; }

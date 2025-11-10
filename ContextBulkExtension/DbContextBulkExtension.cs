@@ -192,7 +192,8 @@ public static partial class DbContextBulkExtensionUpsert
         }
 
         // For upsert, always include all columns (including identity) in temp table
-        var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
+        var allColumns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
+        var columnsWithoutIdentity = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: false);
         var tableName = EntityMetadataHelper.GetTableName<T>(context);
 
         // Ensure connection is open
@@ -220,7 +221,7 @@ public static partial class DbContextBulkExtensionUpsert
             var needsIdentitySync = identityColumns?.Count > 0 && options.IdentityOutput;
 
             // Step 1: Create temp staging table
-            var createTempTableSql = BuildCreateTempTableSql(tempTableName, columns, needsIdentitySync);
+            var createTempTableSql = BuildCreateTempTableSql(tempTableName, allColumns, needsIdentitySync);
             using (var createCmd = new SqlCommand(createTempTableSql, connection, sqlTransaction))
             {
                 await createCmd.ExecuteNonQueryAsync(cancellationToken);
@@ -251,13 +252,13 @@ public static partial class DbContextBulkExtensionUpsert
                     bulkCopy.ColumnMappings.Add(BulkOperationConstants.RowIndexColumnName, BulkOperationConstants.RowIndexColumnName);
                 }
 
-                foreach (var column in columns)
+                foreach (var column in allColumns)
                 {
                     bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
                 }
 
                 // Bulk insert to temp table
-                using var reader = new EntityDataReader<T>(entities, columns, needsIdentitySync);
+                using var reader = new EntityDataReader<T>(entities, allColumns, needsIdentitySync);
                 await bulkCopy.WriteToServerAsync(reader, cancellationToken);
 
                 // Step 3: Extract update column names from expression (if provided)
@@ -268,12 +269,12 @@ public static partial class DbContextBulkExtensionUpsert
                 }
 
                 // Step 4: Execute MERGE statement with custom match columns
-                var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, updateColumnNames, options, identityColumns);
+                var mergeSql = BuildMergeSql(tableName, tempTableName, allColumns, columnsWithoutIdentity, matchColumns, updateColumnNames, options, identityColumns);
 
                 // Debug: Print generated SQL
 #if DEBUG
                 Debug.WriteLine("=== GENERATED MERGE SQL ===");
-                Debug.WriteLine($"[BULK] BulkUpsertAsync merging {entities.Count} entities into {tableName} with {columns.Count} columns, options: {options}");
+                Debug.WriteLine($"[BULK] BulkUpsertAsync merging {entities.Count} entities into {tableName} with {allColumns.Count} columns, options: {options}");
                 Debug.WriteLine(mergeSql);
                 Debug.WriteLine("=========================");
 #endif
@@ -376,7 +377,8 @@ public static partial class DbContextBulkExtensionUpsert
     private static string BuildMergeSql(
         string targetTableName,
         string sourceTableName,
-        IReadOnlyList<ColumnMetadata> columns,
+        IReadOnlyList<ColumnMetadata> allColumns,
+        IReadOnlyList<ColumnMetadata> columnsWithoutIdentity,
         IReadOnlyList<ColumnMetadata> matchKeyColumns,
         List<string>? updateColumnNames,
         BulkConfig options,
@@ -384,7 +386,7 @@ public static partial class DbContextBulkExtensionUpsert
     {
         // Pre-allocate StringBuilder capacity to avoid reallocations
         // Estimate: ~200 chars base + ~100 chars per column (MERGE has UPDATE SET and INSERT clauses)
-        var estimatedSize = 200 + (columns.Count * 100);
+        var estimatedSize = 200 + (allColumns.Count * 100);
         var sql = new StringBuilder(estimatedSize);
 
         // MERGE statement header
@@ -410,8 +412,8 @@ public static partial class DbContextBulkExtensionUpsert
                 matchKeyColumns.Select(pk => pk.ColumnName),
                 StringComparer.OrdinalIgnoreCase);
 
-            var updateColumns = columns
-                .Where(c => !c.IsIdentity && !matchKeyColumnNames.Contains(c.ColumnName))
+            var updateColumns = columnsWithoutIdentity
+                .Where(c => !matchKeyColumnNames.Contains(c.ColumnName))
                 .ToList();
 
             // If updateColumnNames is specified, filter to only those columns
@@ -437,8 +439,8 @@ public static partial class DbContextBulkExtensionUpsert
         }
 
         // WHEN NOT MATCHED clause (insert)
-        // Always exclude identity columns from INSERT - let SQL Server auto-generate them
-        var insertColumns = columns.Where(c => !c.IsIdentity).ToList();
+        // Use pre-filtered columns without identity for INSERT - let SQL Server auto-generate them
+        var insertColumns = columnsWithoutIdentity;
 
         sql.AppendLine("WHEN NOT MATCHED BY TARGET THEN");
         sql.Append("    INSERT (");

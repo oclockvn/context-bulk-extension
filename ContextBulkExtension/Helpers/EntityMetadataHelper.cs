@@ -168,7 +168,7 @@ internal static class EntityMetadataHelper
 
         var cached = _cache.GetOrAdd(cacheKey, _ => BuildEntityMetadata<T>(context));
 
-        return cached.ColumnsWithIdentity.Where(c => c.IsIdentity).ToList();
+        return cached.IdentityColumns;
     }
 
     /// <summary>
