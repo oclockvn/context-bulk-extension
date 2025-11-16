@@ -32,101 +32,138 @@ DbContext db = GetYourDbContext();
 await db.BulkInsertAsync(entities);
 ```
 
+Uses SQL Server's `SqlBulkCopy` for high-performance bulk inserts. No SQL statement is generated - data is streamed directly to the server using the binary protocol.
+
 ### 2. Upsert with Default Compare
 
 ```cs
 DbContext db = GetYourDbContext();
-await db.BulkMergeAsync(entities);
+await db.BulkUpsertAsync(entities);
 ```
 
-Compares by primary key and updates all properties.
+Compares by primary key and updates all non-key properties.
+
+Generated sql:
+
+```sql
+-- Creates temporary staging table
+CREATE TABLE #TempStaging_... (
+    [Id] INT,
+    [Name] NVARCHAR(200),
+    [Value] INT,
+    [CreatedAt] DATETIME2
+);
+
+-- Bulk insert into staging table (using SqlBulkCopy)
+
+-- MERGE statement
+MERGE [SimpleEntities] AS target
+USING #TempStaging_... AS source
+ON target.[Id] = source.[Id]
+WHEN MATCHED THEN
+    UPDATE SET [Name] = source.[Name], [Value] = source.[Value], [CreatedAt] = source.[CreatedAt]
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT ([Name], [Value], [CreatedAt])
+    VALUES (source.[Name], source.[Value], source.[CreatedAt]);
+```
 
 ### 3. Upsert with Advanced Usage
 
 ```cs
 DbContext db = GetYourDbContext();
 
-await db.BulkMergeAsync(
+await db.BulkUpsertAsync(
     entities,
-    onCompare: x => new { x.Email, x.Username },
-    updateProperties: x => new { x.LastLogin, x.Status }
+    matchOn: x => new { x.Email, x.Username },
+    updateColumns: x => new { x.LastLogin, x.Status }
 );
 ```
 
 Compares by Email and Username, updates only LastLogin and Status properties.
 
-## Publishing New Versions
+Generated sql:
 
-### Prerequisites
+```sql
+-- Creates temporary staging table
+CREATE TABLE #TempStaging_... (
+    [Id] INT,
+    [Email] NVARCHAR(255),
+    [Username] NVARCHAR(100),
+    [FirstName] NVARCHAR(100),
+    [LastName] NVARCHAR(100),
+    [LastLogin] DATETIME2,
+    [Status] NVARCHAR(50),
+    [RegisteredAt] DATETIME2
+);
 
-1. **Trusted Publishing Setup on nuget.org:**
-   - Log into [nuget.org](https://www.nuget.org)
-   - Navigate to your account settings → **Trusted Publishing**
-   - Add a new trusted publishing policy:
-     - **Repository Owner:** Your GitHub username/org
-     - **Repository:** `ContextBulkExtension` (or your actual repo name)
-     - **Workflow File:** `publish-nuget.yml`
-     - **Environment:** (leave empty if not using environments)
+-- Bulk insert into staging table (using SqlBulkCopy)
 
-### Publishing Process
-
-#### Option 1: Using PowerShell Script (Recommended)
-
-Use the automated script to publish a new version:
-
-```powershell
-# Publish version 1.0.0
-.\scripts\publish-nuget.ps1 -Version "1.0.0"
-
-# Dry run to see what would happen
-.\scripts\publish-nuget.ps1 -Version "1.0.0" -DryRun
-
-# Skip build and tests (if already verified)
-.\scripts\publish-nuget.ps1 -Version "1.0.0" -SkipBuild -SkipTest
+-- MERGE statement with custom match and update columns
+MERGE [UserEntities] AS target
+USING #TempStaging_... AS source
+ON target.[Email] = source.[Email] AND target.[Username] = source.[Username]
+WHEN MATCHED THEN
+    UPDATE SET [LastLogin] = source.[LastLogin], [Status] = source.[Status]
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT ([Email], [Username], [FirstName], [LastName], [LastLogin], [Status], [RegisteredAt])
+    VALUES (source.[Email], source.[Username], source.[FirstName], source.[LastName], source.[LastLogin], source.[Status], source.[RegisteredAt]);
 ```
 
-The script will:
-1. Update `BaseVersion` in `NugetPackages/Directory.Build.props`
-2. Build the projects (unless `-SkipBuild` is specified)
-3. Run tests (unless `-SkipTest` is specified)
-4. Create a git tag (e.g., `v1.0.0`)
-5. Push the tag to remote, which triggers the GitHub Actions workflow
+### 4. Upsert with deletion
 
-#### Option 2: Manual Process
+Performs upsert operations and optionally deletes records in the target table that don't exist in the source batch.
 
-1. Update `BaseVersion` in `NugetPackages/Directory.Build.props`:
-   ```xml
-   <BaseVersion>1.0</BaseVersion>  <!-- For version 8.1.0 -->
-   ```
+```cs
+DbContext db = GetYourDbContext();
 
-2. Create and push a git tag:
-   ```bash
-   git tag -a v1.0.0 -m "Release version 1.0.0"
-   git push origin v1.0.0
-   ```
+// Delete records not in source, scoped to specific account
+await db.BulkUpsertWithDeleteScopeAsync(
+    entities,
+    matchOn: x => new { x.AccountId, x.Metric, x.Date },
+    deleteScope: x => x.AccountId == 123 && x.Category == "Energy"
+);
+```
 
-3. The GitHub Actions workflow will automatically:
-   - Build the packaging projects
-   - Pack the NuGet packages
-   - Authenticate using Trusted Publishing (OIDC)
-   - Publish to nuget.org
+**⚠️ Important:** When `deleteScope` is `null`, ALL records in the target table that don't match ANY row in the source batch will be deleted. Always provide a `deleteScope` to limit deletions to a specific subset (e.g., specific account, date range, or category).
 
-#### Option 3: Manual Workflow Dispatch
+Generated sql:
 
-1. Go to the **Actions** tab in GitHub
-2. Select **Publish NuGet Package** workflow
-3. Click **Run workflow**
-4. Enter the version (e.g., `1.0.0`)
-5. Click **Run workflow**
+```sql
+-- Creates temporary staging table
+CREATE TABLE #TempStaging_... (
+    [Id] INT,
+    [AccountId] INT,
+    [Metric] NVARCHAR(100),
+    [Date] DATETIME2,
+    [Value] DECIMAL(18,2),
+    [Category] NVARCHAR(100)
+);
 
-### Version Tag Format
+-- Bulk insert into staging table (using SqlBulkCopy)
 
-Tags must follow semantic versioning: `v1.0.0`, `v1.0.1`, `v2.0.0`, etc.
+-- MERGE statement with deletion
+MERGE [MetricEntities] AS target
+USING #TempStaging_... AS source
+ON target.[AccountId] = source.[AccountId] 
+   AND target.[Metric] = source.[Metric] 
+   AND target.[Date] = source.[Date]
+WHEN MATCHED THEN
+    UPDATE SET [Value] = source.[Value], [Category] = source.[Category]
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT ([AccountId], [Metric], [Date], [Value], [Category])
+    VALUES (source.[AccountId], source.[Metric], source.[Date], source.[Value], source.[Category])
+WHEN NOT MATCHED BY SOURCE AND [AccountId] = @p0 AND [Category] = @p1 THEN
+    DELETE;
+```
 
-The workflow extracts the version number (without the 'v' prefix) and sets it as `BaseVersion` in `Directory.Build.props`. The final package version will be `8.{BaseVersion}` for EF Core 8.x packages (e.g., `8.1.0`).
+**Parameters:**
+- `matchOn`: Expression specifying which columns to match on (defaults to primary key)
+- `updateColumns`: Expression specifying which columns to update on match (defaults to all non-key columns)
+- `deleteScope`: **Optional** expression to scope which records can be deleted (e.g., `x => x.AccountId == 123`)
 
 ## Roadmap
 
-- [ ] BulkMerge
+- ~~[ ] BulkMerge~~ cancelled, use BulkUpsert instead
 - [x] Identity output
+- [x] Upsert with deletion
 - [ ] Benchmark with large dataset and table with 20+ columns
