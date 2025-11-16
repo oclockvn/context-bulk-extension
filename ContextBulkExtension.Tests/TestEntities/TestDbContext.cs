@@ -13,6 +13,7 @@ public class TestDbContext : DbContext
     public DbSet<EntityWithoutIdentity> EntitiesWithoutIdentity { get; set; }
     public DbSet<EntityWithComputedColumn> EntitiesWithComputedColumn { get; set; }
     public DbSet<UserEntity> UserEntities { get; set; }
+    public DbSet<MetricEntity> MetricEntities { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -78,6 +79,18 @@ public class TestDbContext : DbContext
             entity.HasIndex(e => e.Email).IsUnique();
             // Add composite index on Email + Username for composite matchOn tests
             entity.HasIndex(e => new { e.Email, e.Username }).IsUnique();
+        });
+
+        // MetricEntity configuration
+        modelBuilder.Entity<MetricEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.AccountId).IsRequired();
+            entity.Property(e => e.Metric).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Date).IsRequired();
+            entity.Property(e => e.Value).HasPrecision(18, 4).IsRequired();
+            entity.Property(e => e.Category).HasMaxLength(100);
         });
     }
 }

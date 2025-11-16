@@ -5,6 +5,7 @@ using System.Data;
 using System.Text;
 using System.Diagnostics;
 using ContextBulkExtension.Helpers;
+using ContextBulkExtension.Extensions;
 
 namespace ContextBulkExtension;
 
@@ -132,13 +133,67 @@ public static partial class DbContextBulkExtensionUpsert
     /// <param name="cancellationToken">The cancellation token</param>
     /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity has no primary key (and matchOn is null), entity type is not part of the model, or database provider is not SQL Server</exception>
-    public static async Task BulkUpsertAsync<T>(
+    public static Task BulkUpsertAsync<T>(
         this DbContext context,
         IList<T> entities,
         System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null,
         System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null,
         BulkConfig? options = null,
         CancellationToken cancellationToken = default) where T : class
+        => BulkUpsertInternalAsync(context, entities, matchOn, updateColumns, deleteScope: null, options, deleteNotMatchedBySource: false, cancellationToken);
+
+    /// <summary>
+    /// Performs a high-performance bulk upsert (insert or update) of entities using SqlBulkCopy with MERGE statement.
+    /// Inserts new records and updates existing records based on custom match columns or primary key matching.
+    /// Additionally deletes records in the target table that don't exist in the source batch.
+    /// <para>
+    /// <strong>Note:</strong> If entities list is empty, the operation returns early without performing any deletions.
+    /// Deletion requires at least one entity in the source batch to establish match criteria.
+    /// </para>
+    /// </summary>
+    /// <typeparam name="T">The entity type</typeparam>
+    /// <param name="context">The DbContext instance</param>
+    /// <param name="entities">The entities to upsert</param>
+    /// <param name="matchOn">Expression specifying which columns to match on. Use single property (x => x.Email) or anonymous type (x => new { x.Email, x.Username }). If null (default), primary keys will be used.</param>
+    /// <param name="updateColumns">Expression specifying which columns to update on match. Use single property (x => x.Status) or anonymous type (x => new { x.Name, x.UpdatedAt }). If null (default), all non-key columns will be updated.</param>
+    /// <param name="deleteScope">
+    /// Optional expression to scope which records can be deleted.
+    /// Example: x => x.AccountId == 123 &amp;&amp; x.Metric == "TOU"
+    /// <para>
+    /// <strong>⚠️ CRITICAL:</strong> When deleteScope is null, ALL records in the target table
+    /// that don't match ANY row in the source batch will be deleted. Use with extreme caution!
+    /// </para>
+    /// <para>
+    /// <strong>Recommended usage:</strong> Always provide deleteScope to limit deletions to a specific subset of data
+    /// (e.g., specific account, date range, or category).
+    /// </para>
+    /// </param>
+    /// <param name="config">Configuration options for the bulk upsert operation. If null, default options will be used.</param>
+    /// <param name="cancellationToken">The cancellation token</param>
+    /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
+    /// <exception cref="InvalidOperationException">Thrown when entity has no primary key (and matchOn is null), entity type is not part of the model, or database provider is not SQL Server</exception>
+    public static Task BulkUpsertWithDeleteScopeAsync<T>(
+        this DbContext context,
+        IList<T> entities,
+        System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null,
+        System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null,
+        System.Linq.Expressions.Expression<Func<T, bool>>? deleteScope = null,
+        BulkConfig? config = null,
+        CancellationToken cancellationToken = default) where T : class
+        => BulkUpsertInternalAsync(context, entities, matchOn, updateColumns, deleteScope, config, deleteNotMatchedBySource: true, cancellationToken);
+
+    /// <summary>
+    /// Internal method that performs bulk upsert with optional delete when not matched by source.
+    /// </summary>
+    private static async Task BulkUpsertInternalAsync<T>(
+        DbContext context,
+        IList<T> entities,
+        System.Linq.Expressions.Expression<Func<T, object>>? matchOn,
+        System.Linq.Expressions.Expression<Func<T, object>>? updateColumns,
+        System.Linq.Expressions.Expression<Func<T, bool>>? deleteScope,
+        BulkConfig? options,
+        bool deleteNotMatchedBySource,
+        CancellationToken cancellationToken) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
@@ -267,8 +322,16 @@ public static partial class DbContextBulkExtensionUpsert
                     updateColumnNames = ExtractPropertyNamesFromExpression(updateColumns);
                 }
 
-                // Step 4: Execute MERGE statement with custom match columns
-                var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, updateColumnNames, options, identityColumns);
+                // Step 4: Build deleteScope WHERE clause if provided
+                string? deleteScopeSql = null;
+                List<SqlParameter>? deleteScopeParameters = null;
+                if (deleteNotMatchedBySource && deleteScope != null)
+                {
+                    (deleteScopeSql, deleteScopeParameters) = ExpressionHelper.BuildWhereClauseFromExpression(deleteScope, context);
+                }
+
+                // Step 5: Execute MERGE statement with custom match columns
+                var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, updateColumnNames, options, identityColumns, deleteNotMatchedBySource, deleteScopeSql);
 
                 // Debug: Print generated SQL
 #if DEBUG
@@ -280,6 +343,12 @@ public static partial class DbContextBulkExtensionUpsert
 
                 using var mergeCmd = new SqlCommand(mergeSql, connection, sqlTransaction);
                 mergeCmd.CommandTimeout = options.TimeoutSeconds;
+
+                // Add deleteScope parameters if any
+                if (deleteScopeParameters?.Count > 0)
+                {
+                    mergeCmd.Parameters.AddRange(deleteScopeParameters.ToArray());
+                }
 
                 // If identity sync is enabled, read OUTPUT results and sync back to entities
                 if (needsIdentitySync)
@@ -358,7 +427,7 @@ public static partial class DbContextBulkExtensionUpsert
         for (int i = 0; i < columns.Count; i++)
         {
             var column = columns[i];
-            sql.Append($"    {EscapeSqlIdentifier(column.ColumnName)} {column.SqlType}");
+            sql.Append($"    {column.ColumnName.EscapeSqlIdentifier()} {column.SqlType}");
 
             if (i < columns.Count - 1)
                 sql.AppendLine(",");
@@ -380,7 +449,9 @@ public static partial class DbContextBulkExtensionUpsert
         IReadOnlyList<ColumnMetadata> matchKeyColumns,
         List<string>? updateColumnNames,
         BulkConfig options,
-        IReadOnlyList<ColumnMetadata>? identityColumns = null)
+        IReadOnlyList<ColumnMetadata>? identityColumns = null,
+        bool deleteNotMatchedBySource = false,
+        string? deleteScopeSql = null)
     {
         // Pre-allocate StringBuilder capacity to avoid reallocations
         // Estimate: ~200 chars base + ~100 chars per column (MERGE has UPDATE SET and INSERT clauses)
@@ -396,7 +467,7 @@ public static partial class DbContextBulkExtensionUpsert
         for (int i = 0; i < matchKeyColumns.Count; i++)
         {
             if (i > 0) sql.Append(" AND ");
-            var matchColumn = EscapeSqlIdentifier(matchKeyColumns[i].ColumnName);
+            var matchColumn = matchKeyColumns[i].ColumnName.EscapeSqlIdentifier();
             sql.Append($"target.{matchColumn} = source.{matchColumn}");
         }
         sql.AppendLine();
@@ -429,7 +500,7 @@ public static partial class DbContextBulkExtensionUpsert
                 for (int i = 0; i < updateColumns.Count; i++)
                 {
                     if (i > 0) sql.Append(", ");
-                    var columnName = EscapeSqlIdentifier(updateColumns[i].ColumnName);
+                    var columnName = updateColumns[i].ColumnName.EscapeSqlIdentifier();
                     sql.Append($"{columnName} = source.{columnName}");
                 }
                 sql.AppendLine();
@@ -446,7 +517,7 @@ public static partial class DbContextBulkExtensionUpsert
         for (int i = 0; i < insertColumns.Count; i++)
         {
             if (i > 0) sql.Append(", ");
-            sql.Append(EscapeSqlIdentifier(insertColumns[i].ColumnName));
+            sql.Append(insertColumns[i].ColumnName.EscapeSqlIdentifier());
         }
 
         sql.AppendLine(")");
@@ -455,10 +526,25 @@ public static partial class DbContextBulkExtensionUpsert
         for (int i = 0; i < insertColumns.Count; i++)
         {
             if (i > 0) sql.Append(", ");
-            sql.Append($"source.{EscapeSqlIdentifier(insertColumns[i].ColumnName)}");
+            sql.Append($"source.{insertColumns[i].ColumnName.EscapeSqlIdentifier()}");
         }
 
         sql.AppendLine(")");
+
+        // WHEN NOT MATCHED BY SOURCE clause (delete)
+        if (deleteNotMatchedBySource)
+        {
+            sql.Append("WHEN NOT MATCHED BY SOURCE");
+
+            // Add deleteScope filter if provided
+            if (!string.IsNullOrEmpty(deleteScopeSql))
+            {
+                sql.Append($" AND {deleteScopeSql}");
+            }
+
+            sql.AppendLine(" THEN");
+            sql.AppendLine("    DELETE");
+        }
 
         // Add OUTPUT clause if identity sync is enabled and there are identity columns
         if (options.IdentityOutput && identityColumns?.Count > 0)
@@ -468,7 +554,7 @@ public static partial class DbContextBulkExtensionUpsert
             // Output all identity columns
             foreach (var identityColumn in identityColumns)
             {
-                sql.Append($", INSERTED.{EscapeSqlIdentifier(identityColumn.ColumnName)}");
+                sql.Append($", INSERTED.{identityColumn.ColumnName.EscapeSqlIdentifier()}");
             }
 
             sql.AppendLine($", {BulkOperationConstants.MergeActionColumn}");
@@ -479,17 +565,6 @@ public static partial class DbContextBulkExtensionUpsert
         return sql.ToString();
     }
 
-    /// <summary>
-    /// Escapes SQL Server identifiers by replacing ] with ]] and wrapping in brackets.
-    /// </summary>
-    private static string EscapeSqlIdentifier(string identifier)
-    {
-        if (string.IsNullOrEmpty(identifier))
-            throw new ArgumentException("SQL identifier cannot be null or empty.", nameof(identifier));
-
-        // Replace ] with ]] (SQL Server escape sequence for brackets)
-        return $"[{identifier.Replace("]", "]]")}]";
-    }
 
     /// <summary>
     /// Extracts property names from a MatchOn expression.
