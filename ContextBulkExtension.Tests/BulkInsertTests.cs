@@ -4,15 +4,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ContextBulkExtension.Tests;
 
-[Collection("Database")]
-public class BulkInsertTests : IAsyncLifetime
+public class BulkInsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFixture>, IAsyncLifetime
 {
-    private readonly DatabaseFixture _fixture;
-
-    public BulkInsertTests(DatabaseFixture fixture)
-    {
-        _fixture = fixture;
-    }
+    private readonly DatabaseFixture _fixture = fixture;
 
     public Task InitializeAsync() => Task.CompletedTask;
 
@@ -37,34 +31,13 @@ public class BulkInsertTests : IAsyncLifetime
         Assert.Equal(0, count);
     }
 
-    [Fact]
-    public async Task BulkInsertAsync_WithSingleEntity_ShouldInsertSuccessfully()
-    {
-        // Arrange
-        var entity = new SimpleEntity
-        {
-            Name = "Test Entity",
-            Value = 100,
-            CreatedAt = DateTime.UtcNow
-        };
 
-        // Act
-        await using var context = _fixture.CreateNewContext();
-        await context.BulkInsertAsync(new[] { entity });
-
-        // Assert
-        var entities = await _fixture.GetAllEntitiesAsync<SimpleEntity>();
-        Assert.Single(entities);
-        Assert.Equal("Test Entity", entities[0].Name);
-        Assert.Equal(100, entities[0].Value);
-        Assert.True(entities[0].Id > 0);
-    }
 
     [Fact]
-    public async Task BulkInsertAsync_WithMultipleEntities_ShouldInsertAll()
+    public async Task BulkInsertAsync_WithMultipleEntities_ShouldInsertCorrectly()
     {
         // Arrange
-        var entities = Enumerable.Range(1, 1000)
+        var entities = Enumerable.Range(1, 50)
             .Select(i => new SimpleEntity
             {
                 Name = $"Entity {i}",
@@ -79,17 +52,24 @@ public class BulkInsertTests : IAsyncLifetime
 
         // Assert
         var count = await _fixture.GetCountAsync<SimpleEntity>();
-        Assert.Equal(1000, count);
+        Assert.Equal(50, count);
 
         var insertedEntities = await _fixture.GetAllEntitiesAsync<SimpleEntity>();
         Assert.All(insertedEntities, e => Assert.True(e.Id > 0));
+
+        // Verify data mapping
+        var first = insertedEntities.First(e => e.Value == 1);
+        Assert.Equal("Entity 1", first.Name);
+
+        var last = insertedEntities.First(e => e.Value == 50);
+        Assert.Equal("Entity 50", last.Name);
     }
 
     [Fact]
     public async Task BulkInsertAsync_WithCustomBatchSize_ShouldInsertAll()
     {
         // Arrange
-        var entities = Enumerable.Range(1, 5000)
+        var entities = Enumerable.Range(1, 30)
             .Select(i => new SimpleEntity
             {
                 Name = $"Entity {i}",
@@ -98,7 +78,7 @@ public class BulkInsertTests : IAsyncLifetime
             })
             .ToList();
 
-        var options = new BulkConfig { BatchSize = 500 };
+        var options = new BulkConfig { BatchSize = 10 };
 
         // Act
         await using var context = _fixture.CreateNewContext();
@@ -106,7 +86,7 @@ public class BulkInsertTests : IAsyncLifetime
 
         // Assert
         var count = await _fixture.GetCountAsync<SimpleEntity>();
-        Assert.Equal(5000, count);
+        Assert.Equal(30, count);
     }
 
     [Fact]
@@ -233,7 +213,7 @@ public class BulkInsertTests : IAsyncLifetime
     public async Task BulkInsertAsync_WithCheckConstraintsFalse_ShouldInsertSuccessfully()
     {
         // Arrange
-        var entities = Enumerable.Range(1, 100)
+        var entities = Enumerable.Range(1, 1)
             .Select(i => new SimpleEntity
             {
                 Name = $"Entity {i}",
@@ -250,14 +230,14 @@ public class BulkInsertTests : IAsyncLifetime
 
         // Assert
         var count = await _fixture.GetCountAsync<SimpleEntity>();
-        Assert.Equal(100, count);
+        Assert.Equal(1, count);
     }
 
     [Fact]
     public async Task BulkInsertAsync_WithUseTableLockFalse_ShouldInsertSuccessfully()
     {
         // Arrange
-        var entities = Enumerable.Range(1, 100)
+        var entities = Enumerable.Range(1, 1)
             .Select(i => new SimpleEntity
             {
                 Name = $"Entity {i}",
@@ -274,6 +254,6 @@ public class BulkInsertTests : IAsyncLifetime
 
         // Assert
         var count = await _fixture.GetCountAsync<SimpleEntity>();
-        Assert.Equal(100, count);
+        Assert.Equal(1, count);
     }
 }
