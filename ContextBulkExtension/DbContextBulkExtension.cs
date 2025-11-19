@@ -63,11 +63,8 @@ public static partial class DbContextBulkExtensionUpsert
 
         var tableName = EntityMetadataHelper.GetTableName<T>(context);
 
-        // Ensure connection is open (let EF Core/ADO.NET manage connection lifecycle)
-        if (connection.State != ConnectionState.Open)
-        {
-            await connection.OpenAsync(cancellationToken);
-        }
+        // Ensure connection is open using EF Core's connection management
+        await context.Database.OpenConnectionAsync(cancellationToken);
 
         try
         {
@@ -118,6 +115,10 @@ public static partial class DbContextBulkExtensionUpsert
                 $"Bulk insert failed for entity type '{typeof(T).Name}'. " +
                 $"Error: {ex.Message}", ex);
         }
+        finally
+        {
+            await context.Database.CloseConnectionAsync();
+        }
     }
 
     /// <summary>
@@ -158,7 +159,7 @@ public static partial class DbContextBulkExtensionUpsert
     /// <param name="updateColumns">Expression specifying which columns to update on match. Use single property (x => x.Status) or anonymous type (x => new { x.Name, x.UpdatedAt }). If null (default), all non-key columns will be updated.</param>
     /// <param name="deleteScope">
     /// Optional expression to scope which records can be deleted.
-    /// Example: x => x.AccountId == 123 &amp;&amp; x.Metric == "TOU"
+    /// Example: x => x.AccountId == 123 &amp; x.UpdatedUtc > DateTime.UtcNow.AddDays(-1)
     /// <para>
     /// <strong>⚠️ CRITICAL:</strong> When deleteScope is null, ALL records in the target table
     /// that don't match ANY row in the source batch will be deleted. Use with extreme caution!
@@ -250,11 +251,8 @@ public static partial class DbContextBulkExtensionUpsert
         var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
         var tableName = EntityMetadataHelper.GetTableName<T>(context);
 
-        // Ensure connection is open
-        if (connection.State != ConnectionState.Open)
-        {
-            await connection.OpenAsync(cancellationToken);
-        }
+        // Ensure connection is open using EF Core's connection management
+        await context.Database.OpenConnectionAsync(cancellationToken);
 
         // Generate unique temp table name to support concurrent operations
         var tempTableName = $"{BulkOperationConstants.TempTablePrefix}{Guid.NewGuid():N}";
@@ -404,6 +402,10 @@ public static partial class DbContextBulkExtensionUpsert
         catch (SqlException ex)
         {
             throw new InvalidOperationException($"Bulk upsert failed for entity type '{typeof(T).Name}'. Error: {ex.Message}", ex);
+        }
+        finally
+        {
+            await context.Database.CloseConnectionAsync();
         }
     }
 
