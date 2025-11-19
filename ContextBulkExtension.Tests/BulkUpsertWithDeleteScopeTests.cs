@@ -4,15 +4,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ContextBulkExtension.Tests;
 
-[Collection("Database")]
-public class BulkUpsertWithDeleteScopeTests : IAsyncLifetime
+public class BulkUpsertWithDeleteScopeTests(DatabaseFixture fixture) : IClassFixture<DatabaseFixture>, IAsyncLifetime
 {
-    private readonly DatabaseFixture _fixture;
-
-    public BulkUpsertWithDeleteScopeTests(DatabaseFixture fixture)
-    {
-        _fixture = fixture;
-    }
+    private readonly DatabaseFixture _fixture = fixture;
 
     public Task InitializeAsync() => Task.CompletedTask;
 
@@ -46,133 +40,143 @@ public class BulkUpsertWithDeleteScopeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BulkUpsertWithDeleteScopeAsync_WithSimpleEquality_ShouldDeleteMatchingScope()
+    public async Task BulkUpsertWithDeleteScopeAsync_ShouldHandleDifferentExpressionPatterns()
     {
-        // Arrange - Seed data for multiple accounts
-        var existingData = new List<MetricEntity>
+        // Ensure clean state at start
+        await _fixture.ClearTableAsync<MetricEntity>();
+
+        // Test Case 1: Simple equality expression
         {
-            // Account 123 - should be managed by deleteScope
-            new() { AccountId = 123, Metric = "TOU", Date = DateTime.UtcNow.Date, Value = 100, Category = "Energy" },
-            new() { AccountId = 123, Metric = "Demand", Date = DateTime.UtcNow.Date, Value = 50, Category = "Energy" },
-            // Account 456 - should NOT be touched
-            new() { AccountId = 456, Metric = "TOU", Date = DateTime.UtcNow.Date, Value = 200, Category = "Energy" },
-            new() { AccountId = 456, Metric = "Demand", Date = DateTime.UtcNow.Date, Value = 75, Category = "Energy" }
-        };
-        await _fixture.SeedDataAsync(existingData);
+            // Arrange - Seed data for multiple accounts
+            var existingData = new List<MetricEntity>
+            {
+                // Account 123 - should be managed by deleteScope
+                new() { AccountId = 123, Metric = "TOU", Date = DateTime.UtcNow.Date, Value = 100, Category = "Energy" },
+                new() { AccountId = 123, Metric = "Demand", Date = DateTime.UtcNow.Date, Value = 50, Category = "Energy" },
+                // Account 456 - should NOT be touched
+                new() { AccountId = 456, Metric = "TOU", Date = DateTime.UtcNow.Date, Value = 200, Category = "Energy" },
+                new() { AccountId = 456, Metric = "Demand", Date = DateTime.UtcNow.Date, Value = 75, Category = "Energy" }
+            };
+            await _fixture.SeedDataAsync(existingData);
 
-        // Act - Upsert new data for Account 123, delete old TOU and Demand, keep only the new one
-        var newData = new List<MetricEntity>
+            // Act - Upsert new data for Account 123, delete old TOU and Demand, keep only the new one
+            var newData = new List<MetricEntity>
+            {
+                new() { AccountId = 123, Metric = "Solar", Date = DateTime.UtcNow.Date, Value = 150, Category = "Renewable" }
+            };
+
+            await using var context = _fixture.CreateNewContext();
+            await context.BulkUpsertWithDeleteScopeAsync(
+                newData,
+                deleteScope: m => m.AccountId == 123);
+
+            // Assert
+            var allData = await _fixture.GetAllEntitiesAsync<MetricEntity>();
+            Assert.Equal(3, allData.Count); // 1 new for Account 123, 2 unchanged for Account 456
+
+            // Account 123 should only have Solar
+            var account123Data = allData.Where(m => m.AccountId == 123).ToList();
+            Assert.Single(account123Data);
+            Assert.Equal("Solar", account123Data[0].Metric);
+
+            // Account 456 should remain unchanged
+            var account456Data = allData.Where(m => m.AccountId == 456).ToList();
+            Assert.Equal(2, account456Data.Count);
+            Assert.Contains(account456Data, m => m.Metric == "TOU");
+            Assert.Contains(account456Data, m => m.Metric == "Demand");
+        }
+
+        // Clean up for next test case
+        await _fixture.ClearTableAsync<MetricEntity>();
+
+        // Test Case 2: Complex AND expression
         {
-            new() { AccountId = 123, Metric = "Solar", Date = DateTime.UtcNow.Date, Value = 150, Category = "Renewable" }
-        };
+            // Arrange - Seed data with multiple AccountIds, Metrics, and Categories
+            var baseDate = DateTime.UtcNow.Date;
+            var existingData = new List<MetricEntity>
+            {
+                // Account 123, Metric TOU - should be managed by deleteScope
+                new() { AccountId = 123, Metric = "TOU", Date = baseDate.AddDays(-2), Value = 100, Category = "Energy" },
+                new() { AccountId = 123, Metric = "TOU", Date = baseDate.AddDays(-1), Value = 110, Category = "Energy" },
+                // Account 123, Metric Demand - should NOT be touched (different metric)
+                new() { AccountId = 123, Metric = "Demand", Date = baseDate.AddDays(-2), Value = 50, Category = "Energy" },
+                // Account 456, Metric TOU - should NOT be touched (different account)
+                new() { AccountId = 456, Metric = "TOU", Date = baseDate.AddDays(-2), Value = 200, Category = "Energy" }
+            };
+            await _fixture.SeedDataAsync(existingData);
 
-        await using var context = _fixture.CreateNewContext();
-        await context.BulkUpsertWithDeleteScopeAsync(
-            newData,
-            deleteScope: m => m.AccountId == 123);
+            // Act - Upsert new TOU data for Account 123
+            var newData = new List<MetricEntity>
+            {
+                new() { AccountId = 123, Metric = "TOU", Date = baseDate, Value = 120, Category = "Energy" }
+            };
 
-        // Assert
-        var allData = await _fixture.GetAllEntitiesAsync<MetricEntity>();
-        Assert.Equal(3, allData.Count); // 1 new for Account 123, 2 unchanged for Account 456
+            await using var context = _fixture.CreateNewContext();
+            await context.BulkUpsertWithDeleteScopeAsync(
+                newData,
+                deleteScope: m => m.AccountId == 123 && m.Metric == "TOU");
 
-        // Account 123 should only have Solar
-        var account123Data = allData.Where(m => m.AccountId == 123).ToList();
-        Assert.Single(account123Data);
-        Assert.Equal("Solar", account123Data[0].Metric);
+            // Assert
+            var allData = await _fixture.GetAllEntitiesAsync<MetricEntity>();
+            Assert.Equal(3, allData.Count); // 1 new TOU for 123, 1 Demand for 123, 1 TOU for 456
 
-        // Account 456 should remain unchanged
-        var account456Data = allData.Where(m => m.AccountId == 456).ToList();
-        Assert.Equal(2, account456Data.Count);
-        Assert.Contains(account456Data, m => m.Metric == "TOU");
-        Assert.Contains(account456Data, m => m.Metric == "Demand");
-    }
+            // Account 123, TOU - should only have the new record
+            var account123TOU = allData.Where(m => m.AccountId == 123 && m.Metric == "TOU").ToList();
+            Assert.Single(account123TOU);
+            Assert.Equal(baseDate, account123TOU[0].Date);
+            Assert.Equal(120, account123TOU[0].Value);
 
-    [Fact]
-    public async Task BulkUpsertWithDeleteScopeAsync_WithComplexAndExpression_ShouldDeleteMatchingScope()
-    {
-        // Arrange - Seed data with multiple AccountIds, Metrics, and Categories
-        var baseDate = DateTime.UtcNow.Date;
-        var existingData = new List<MetricEntity>
+            // Account 123, Demand - should remain unchanged
+            var account123Demand = allData.Where(m => m.AccountId == 123 && m.Metric == "Demand").ToList();
+            Assert.Single(account123Demand);
+
+            // Account 456 - should remain unchanged
+            var account456Data = allData.Where(m => m.AccountId == 456).ToList();
+            Assert.Single(account456Data);
+        }
+
+        // Clean up for next test case
+        await _fixture.ClearTableAsync<MetricEntity>();
+
+        // Test Case 3: OR expression
         {
-            // Account 123, Metric TOU - should be managed by deleteScope
-            new() { AccountId = 123, Metric = "TOU", Date = baseDate.AddDays(-2), Value = 100, Category = "Energy" },
-            new() { AccountId = 123, Metric = "TOU", Date = baseDate.AddDays(-1), Value = 110, Category = "Energy" },
-            // Account 123, Metric Demand - should NOT be touched (different metric)
-            new() { AccountId = 123, Metric = "Demand", Date = baseDate.AddDays(-2), Value = 50, Category = "Energy" },
-            // Account 456, Metric TOU - should NOT be touched (different account)
-            new() { AccountId = 456, Metric = "TOU", Date = baseDate.AddDays(-2), Value = 200, Category = "Energy" }
-        };
-        await _fixture.SeedDataAsync(existingData);
+            // Arrange - Seed data with multiple categories
+            var existingData = new List<MetricEntity>
+            {
+                // Category "Energy" - should be deleted
+                new() { AccountId = 123, Metric = "TOU", Date = DateTime.UtcNow.Date, Value = 100, Category = "Energy" },
+                // Category "Renewable" - should be deleted
+                new() { AccountId = 123, Metric = "Solar", Date = DateTime.UtcNow.Date, Value = 50, Category = "Renewable" },
+                // Category "Other" - should NOT be deleted
+                new() { AccountId = 123, Metric = "Usage", Date = DateTime.UtcNow.Date, Value = 75, Category = "Other" }
+            };
+            await _fixture.SeedDataAsync(existingData);
 
-        // Act - Upsert new TOU data for Account 123
-        var newData = new List<MetricEntity>
-        {
-            new() { AccountId = 123, Metric = "TOU", Date = baseDate, Value = 120, Category = "Energy" }
-        };
+            // Act - Upsert new data with deleteScope using OR
+            var newData = new List<MetricEntity>
+            {
+                new() { AccountId = 123, Metric = "NewTOU", Date = DateTime.UtcNow.Date, Value = 200, Category = "Energy" }
+            };
 
-        await using var context = _fixture.CreateNewContext();
-        await context.BulkUpsertWithDeleteScopeAsync(
-            newData,
-            deleteScope: m => m.AccountId == 123 && m.Metric == "TOU");
+            await using var context = _fixture.CreateNewContext();
+            await context.BulkUpsertWithDeleteScopeAsync(
+                newData,
+                deleteScope: m => m.Category == "Energy" || m.Category == "Renewable");
 
-        // Assert
-        var allData = await _fixture.GetAllEntitiesAsync<MetricEntity>();
-        Assert.Equal(3, allData.Count); // 1 new TOU for 123, 1 Demand for 123, 1 TOU for 456
+            // Assert
+            var allData = await _fixture.GetAllEntitiesAsync<MetricEntity>();
+            Assert.Equal(2, allData.Count); // 1 new Energy, 1 unchanged Other
 
-        // Account 123, TOU - should only have the new record
-        var account123TOU = allData.Where(m => m.AccountId == 123 && m.Metric == "TOU").ToList();
-        Assert.Single(account123TOU);
-        Assert.Equal(baseDate, account123TOU[0].Date);
-        Assert.Equal(120, account123TOU[0].Value);
+            // Should have the new Energy entry
+            Assert.Contains(allData, m => m.Metric == "NewTOU" && m.Category == "Energy");
 
-        // Account 123, Demand - should remain unchanged
-        var account123Demand = allData.Where(m => m.AccountId == 123 && m.Metric == "Demand").ToList();
-        Assert.Single(account123Demand);
+            // Should have the Other entry
+            Assert.Contains(allData, m => m.Category == "Other");
 
-        // Account 456 - should remain unchanged
-        var account456Data = allData.Where(m => m.AccountId == 456).ToList();
-        Assert.Single(account456Data);
-    }
-
-    [Fact]
-    public async Task BulkUpsertWithDeleteScopeAsync_WithOrExpression_ShouldDeleteMatchingScope()
-    {
-        // Arrange - Seed data with multiple categories
-        var existingData = new List<MetricEntity>
-        {
-            // Category "Energy" - should be deleted
-            new() { AccountId = 123, Metric = "TOU", Date = DateTime.UtcNow.Date, Value = 100, Category = "Energy" },
-            // Category "Renewable" - should be deleted
-            new() { AccountId = 123, Metric = "Solar", Date = DateTime.UtcNow.Date, Value = 50, Category = "Renewable" },
-            // Category "Other" - should NOT be deleted
-            new() { AccountId = 123, Metric = "Usage", Date = DateTime.UtcNow.Date, Value = 75, Category = "Other" }
-        };
-        await _fixture.SeedDataAsync(existingData);
-
-        // Act - Upsert new data with deleteScope using OR
-        var newData = new List<MetricEntity>
-        {
-            new() { AccountId = 123, Metric = "NewTOU", Date = DateTime.UtcNow.Date, Value = 200, Category = "Energy" }
-        };
-
-        await using var context = _fixture.CreateNewContext();
-        await context.BulkUpsertWithDeleteScopeAsync(
-            newData,
-            deleteScope: m => m.Category == "Energy" || m.Category == "Renewable");
-
-        // Assert
-        var allData = await _fixture.GetAllEntitiesAsync<MetricEntity>();
-        Assert.Equal(2, allData.Count); // 1 new Energy, 1 unchanged Other
-
-        // Should have the new Energy entry
-        Assert.Contains(allData, m => m.Metric == "NewTOU" && m.Category == "Energy");
-
-        // Should have the Other entry
-        Assert.Contains(allData, m => m.Category == "Other");
-
-        // Should NOT have old Energy or Renewable
-        Assert.DoesNotContain(allData, m => m.Metric == "TOU");
-        Assert.DoesNotContain(allData, m => m.Metric == "Solar");
+            // Should NOT have old Energy or Renewable
+            Assert.DoesNotContain(allData, m => m.Metric == "TOU");
+            Assert.DoesNotContain(allData, m => m.Metric == "Solar");
+        }
     }
 
     [Fact]
@@ -207,80 +211,88 @@ public class BulkUpsertWithDeleteScopeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BulkUpsertWithDeleteScopeAsync_WithDateComparison_ShouldDeleteMatchingScope()
+    public async Task BulkUpsertWithDeleteScopeAsync_ShouldHandleDifferentComparisonTypes()
     {
-        // Arrange - Seed data with different dates
-        var oldDate = DateTime.UtcNow.Date.AddDays(-10);
-        var recentDate = DateTime.UtcNow.Date.AddDays(-2);
-        var today = DateTime.UtcNow.Date;
+        // Ensure clean state at start
+        await _fixture.ClearTableAsync<MetricEntity>();
 
-        var existingData = new List<MetricEntity>
+        // Test Case 1: Date comparison
         {
-            new() { AccountId = 123, Metric = "TOU", Date = oldDate, Value = 100, Category = "Energy" },
-            new() { AccountId = 123, Metric = "TOU", Date = recentDate, Value = 110, Category = "Energy" },
-            new() { AccountId = 123, Metric = "TOU", Date = today, Value = 120, Category = "Energy" }
-        };
-        await _fixture.SeedDataAsync(existingData);
+            // Arrange - Seed data with different dates
+            var oldDate = DateTime.UtcNow.Date.AddDays(-10);
+            var recentDate = DateTime.UtcNow.Date.AddDays(-2);
+            var today = DateTime.UtcNow.Date;
 
-        // Act - Upsert new data, delete only records older than 5 days
-        var cutoffDate = DateTime.UtcNow.Date.AddDays(-5);
-        var newData = new List<MetricEntity>
+            var existingData = new List<MetricEntity>
+            {
+                new() { AccountId = 123, Metric = "TOU", Date = oldDate, Value = 100, Category = "Energy" },
+                new() { AccountId = 123, Metric = "TOU", Date = recentDate, Value = 110, Category = "Energy" },
+                new() { AccountId = 123, Metric = "TOU", Date = today, Value = 120, Category = "Energy" }
+            };
+            await _fixture.SeedDataAsync(existingData);
+
+            // Act - Upsert new data, delete only records older than 5 days
+            var cutoffDate = DateTime.UtcNow.Date.AddDays(-5);
+            var newData = new List<MetricEntity>
+            {
+                new() { AccountId = 123, Metric = "TOU", Date = today.AddDays(1), Value = 130, Category = "Energy" }
+            };
+
+            await using var context = _fixture.CreateNewContext();
+            await context.BulkUpsertWithDeleteScopeAsync(
+                newData,
+                deleteScope: m => m.Date < cutoffDate);
+
+            // Assert
+            var allData = await _fixture.GetAllEntitiesAsync<MetricEntity>();
+            Assert.Equal(3, allData.Count); // old record deleted, recent and today kept, new one added
+
+            // Old record should be deleted
+            Assert.DoesNotContain(allData, m => m.Date == oldDate);
+
+            // Recent and today should remain
+            Assert.Contains(allData, m => m.Date == recentDate);
+            Assert.Contains(allData, m => m.Date == today);
+
+            // New record should be added
+            Assert.Contains(allData, m => m.Date == today.AddDays(1));
+        }
+
+        // Clean up for next test case
+        await _fixture.ClearTableAsync<MetricEntity>();
+
+        // Test Case 2: Null value comparison
         {
-            new() { AccountId = 123, Metric = "TOU", Date = today.AddDays(1), Value = 130, Category = "Energy" }
-        };
+            // Arrange - Seed data with null and non-null categories
+            var existingData = new List<MetricEntity>
+            {
+                new() { AccountId = 123, Metric = "TOU", Date = DateTime.UtcNow.Date, Value = 100, Category = null },
+                new() { AccountId = 123, Metric = "Demand", Date = DateTime.UtcNow.Date, Value = 50, Category = "Energy" }
+            };
+            await _fixture.SeedDataAsync(existingData);
 
-        await using var context = _fixture.CreateNewContext();
-        await context.BulkUpsertWithDeleteScopeAsync(
-            newData,
-            deleteScope: m => m.Date < cutoffDate);
+            // Act - Upsert new data, delete only records with null category
+            var newData = new List<MetricEntity>
+            {
+                new() { AccountId = 123, Metric = "Solar", Date = DateTime.UtcNow.Date, Value = 75, Category = "Renewable" }
+            };
 
-        // Assert
-        var allData = await _fixture.GetAllEntitiesAsync<MetricEntity>();
-        Assert.Equal(3, allData.Count); // old record deleted, recent and today kept, new one added
+            await using var context = _fixture.CreateNewContext();
+            await context.BulkUpsertWithDeleteScopeAsync(
+                newData,
+                deleteScope: m => m.Category == null);
 
-        // Old record should be deleted
-        Assert.DoesNotContain(allData, m => m.Date == oldDate);
+            // Assert
+            var allData = await _fixture.GetAllEntitiesAsync<MetricEntity>();
+            Assert.Equal(2, allData.Count); // null category deleted, Energy and Renewable remain
 
-        // Recent and today should remain
-        Assert.Contains(allData, m => m.Date == recentDate);
-        Assert.Contains(allData, m => m.Date == today);
+            // Should NOT have null category
+            Assert.DoesNotContain(allData, m => m.Category == null);
 
-        // New record should be added
-        Assert.Contains(allData, m => m.Date == today.AddDays(1));
-    }
-
-    [Fact]
-    public async Task BulkUpsertWithDeleteScopeAsync_WithNullValueComparison_ShouldHandleNulls()
-    {
-        // Arrange - Seed data with null and non-null categories
-        var existingData = new List<MetricEntity>
-        {
-            new() { AccountId = 123, Metric = "TOU", Date = DateTime.UtcNow.Date, Value = 100, Category = null },
-            new() { AccountId = 123, Metric = "Demand", Date = DateTime.UtcNow.Date, Value = 50, Category = "Energy" }
-        };
-        await _fixture.SeedDataAsync(existingData);
-
-        // Act - Upsert new data, delete only records with null category
-        var newData = new List<MetricEntity>
-        {
-            new() { AccountId = 123, Metric = "Solar", Date = DateTime.UtcNow.Date, Value = 75, Category = "Renewable" }
-        };
-
-        await using var context = _fixture.CreateNewContext();
-        await context.BulkUpsertWithDeleteScopeAsync(
-            newData,
-            deleteScope: m => m.Category == null);
-
-        // Assert
-        var allData = await _fixture.GetAllEntitiesAsync<MetricEntity>();
-        Assert.Equal(2, allData.Count); // null category deleted, Energy and Renewable remain
-
-        // Should NOT have null category
-        Assert.DoesNotContain(allData, m => m.Category == null);
-
-        // Should have Energy and Renewable
-        Assert.Contains(allData, m => m.Category == "Energy");
-        Assert.Contains(allData, m => m.Category == "Renewable");
+            // Should have Energy and Renewable
+            Assert.Contains(allData, m => m.Category == "Energy");
+            Assert.Contains(allData, m => m.Category == "Renewable");
+        }
     }
 
     [Fact]
