@@ -34,6 +34,16 @@
             "problemMatcher": "$msCompile"
         },
         {
+            "label": "format",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "format",
+                "${workspaceFolder}"
+            ],
+            "problemMatcher": []
+        },
+        {
             "label": "watch",
             "command": "dotnet",
             "type": "process",

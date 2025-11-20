@@ -82,15 +82,15 @@ internal class EntityDataReader<T>(IList<T> entities, IReadOnlyList<ColumnMetada
         var startIndex = includeRowIndex ? 1 : 0;
         for (int i = 0; i < columns.Count; i++)
         {
-			var column = columns[i];
-			var value = column.CompiledGetter(entity);
+            var column = columns[i];
+            var value = column.CompiledGetter(entity);
 
-			// Apply ConvertToProvider if column has converter
-			// Use column.ValueConverter directly instead of dictionary lookup for better performance
-			if (value != null && column.ValueConverter != null)
-			{
-				value = column.ValueConverter.ConvertToProvider.Invoke(value);
-			}
+            // Apply ConvertToProvider if column has converter
+            // Use column.ValueConverter directly instead of dictionary lookup for better performance
+            if (value != null && column.ValueConverter != null)
+            {
+                value = column.ValueConverter.ConvertToProvider.Invoke(value);
+            }
 
             _currentRowValues[startIndex + i] = value ?? DBNull.Value; // Box only once
         }
@@ -128,7 +128,7 @@ internal class EntityDataReader<T>(IList<T> entities, IReadOnlyList<ColumnMetada
             return "Int32";
 
         var columnIndex = includeRowIndex ? ordinal - 1 : ordinal;
-		return columns[columnIndex].ProviderClrType.Name;
+        return columns[columnIndex].ProviderClrType.Name;
     }
 
     public override Type GetFieldType(int ordinal)
@@ -137,8 +137,8 @@ internal class EntityDataReader<T>(IList<T> entities, IReadOnlyList<ColumnMetada
             return typeof(int);
 
         var columnIndex = includeRowIndex ? ordinal - 1 : ordinal;
-		// Use ProviderClrType (database type) for DataTable column type resolution
-		return columns[columnIndex].ProviderClrType;
+        // Use ProviderClrType (database type) for DataTable column type resolution
+        return columns[columnIndex].ProviderClrType;
     }
 
     public override bool IsDBNull(int ordinal)
