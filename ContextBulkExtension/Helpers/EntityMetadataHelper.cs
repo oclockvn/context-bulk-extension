@@ -26,6 +26,9 @@ internal static class EntityMetadataHelper
         }
 
         var allColumns = new List<ColumnMetadata>();
+		var convertiblePropertyColumnDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+		var convertibleColumnConverterDict = new Dictionary<string, Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter>(StringComparer.OrdinalIgnoreCase);
+		Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter? identityColumnConverter = null;
 
         foreach (var property in entityType.GetProperties())
         {
@@ -51,8 +54,39 @@ internal static class EntityMetadataHelper
                 continue;
 
             var clrType = property.ClrType;
+			var propertyName = property.Name;
 
-            // Compile expression delegate for fast property access
+			// Check for owned entity properties (complex types)
+			// Owned properties use composite key format: {NavigationName}_{PropertyName}
+			if (property.DeclaringType is IComplexType complexProperty)
+			{
+				var navigationProperty = complexProperty.ComplexProperty;
+				propertyName = $"{navigationProperty.Name}_{propertyName}";
+			}
+
+			// Get value converter if exists
+			// Use GetTypeMapping().Converter instead of GetValueConverter() to detect all converters
+			// including those from type mappings (e.g., strongly-typed IDs)
+			var converter = property.GetTypeMapping().Converter;
+			Type providerClrType;
+			
+			if (converter != null)
+			{
+				// Property has converter - track it in dictionaries
+				convertiblePropertyColumnDict[propertyName] = columnName;
+				convertibleColumnConverterDict[columnName] = converter;
+				providerClrType = converter.ProviderClrType;
+			}
+			else
+			{
+				// No converter - use model type
+				providerClrType = clrType;
+			}
+
+			// Use ProviderClrType exactly as defined by converter (preserve nullability)
+			// SqlBulkCopy needs the exact type including nullability for correct column type mapping
+
+			// Compile expression delegate for fast property access (without converter)
             var compiledGetter = CompilePropertyGetter<T>(property, clrProperty);
             var compiledSetter = CompilePropertySetter<T>(property, clrProperty);
 
@@ -65,16 +99,25 @@ internal static class EntityMetadataHelper
                               property.GetValueGeneratorFactory() != null ||
                               (isPrimaryKey && (property.ClrType == typeof(int) || property.ClrType == typeof(long))));
 
+			// Track identity column converter
+			if (isIdentity && converter != null && identityColumnConverter == null)
+			{
+				identityColumnConverter = converter;
+			}
+
             var columnMetadata = new ColumnMetadata
             {
                 ColumnName = columnName,
                 SqlType = property.GetColumnType(),
                 PropertyInfo = clrProperty,
+				PropertyName = propertyName,
                 ClrType = Nullable.GetUnderlyingType(clrType) ?? clrType,
+				ProviderClrType = providerClrType,
                 CompiledGetter = compiledGetter,
                 CompiledSetter = compiledSetter,
                 IsIdentity = isIdentity,
-                IsPrimaryKey = isPrimaryKey
+				IsPrimaryKey = isPrimaryKey,
+				ValueConverter = converter
             };
 
             allColumns.Add(columnMetadata);
@@ -104,7 +147,10 @@ internal static class EntityMetadataHelper
 
         return new CachedEntityMetadata(allColumns)
         {
-            TableName = fullTableName
+			TableName = fullTableName,
+			ConvertiblePropertyColumnDict = convertiblePropertyColumnDict,
+			ConvertibleColumnConverterDict = convertibleColumnConverterDict,
+			IdentityColumnConverter = identityColumnConverter
         };
     }
 
@@ -172,6 +218,15 @@ internal static class EntityMetadataHelper
     }
 
     /// <summary>
+	/// Gets the cached entity metadata including converter dictionaries.
+	/// </summary>
+	internal static CachedEntityMetadata GetCachedMetadata<T>(DbContext context) where T : class
+	{
+		var cacheKey = (typeof(T), context.GetType());
+		return _cache.GetOrAdd(cacheKey, _ => BuildEntityMetadata<T>(context));
+	}
+
+	/// <summary>
     /// Clears the metadata cache. Useful for testing or when model changes at runtime.
     /// </summary>
     public static void ClearCache()
@@ -192,7 +247,8 @@ internal static class EntityMetadataHelper
     }
 
     /// <summary>
-    /// Compiles a fast property getter with support for complex properties and value converters.
+	/// Compiles a fast property getter with support for complex properties.
+	/// Returns raw model values (no converter applied - conversion happens at runtime).
     /// </summary>
     private static Func<object, object?> CompilePropertyGetter<T>(IProperty property, System.Reflection.PropertyInfo clrProperty) where T : class
     {
@@ -200,9 +256,8 @@ internal static class EntityMetadataHelper
         Expression propertyAccess;
 
         // Check if this is a complex property (EF Core 8+)
-        var complexProperty = property.DeclaringType as IComplexType;
 
-        if (complexProperty != null)
+		if (property.DeclaringType is IComplexType complexProperty)
         {
             // Handle nested complex property access: instance.ComplexProp.Property
             var complexPropInfo = complexProperty.ComplexProperty.PropertyInfo;
@@ -237,44 +292,21 @@ internal static class EntityMetadataHelper
             propertyAccess = Expression.Property(typedInstance, clrProperty);
         }
 
-        // Apply EF Core value converter if exists
-        var converter = property.GetValueConverter();
-        if (converter != null)
-        {
-            // Get the converter's ConvertToProvider method
-            var convertMethod = converter.GetType().GetMethod("ConvertToProvider",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
-
-            if (convertMethod != null)
-            {
-                var converterConstant = Expression.Constant(converter);
-                Expression converterInput = propertyAccess;
-
-                // Handle null for reference types
-                if (propertyAccess.Type.IsClass)
+		// Box value types for return
+		if (propertyAccess.Type.IsValueType)
                 {
-                    var nullCheck = Expression.Equal(propertyAccess, Expression.Constant(null, propertyAccess.Type));
-                    var convertedValue = Expression.Call(converterConstant, convertMethod, propertyAccess);
-                    var nullResult = Expression.Constant(null, convertedValue.Type);
-                    propertyAccess = Expression.Condition(nullCheck, nullResult, convertedValue);
-                }
-                else
-                {
-                    propertyAccess = Expression.Call(converterConstant, convertMethod, propertyAccess);
-                }
-            }
+			propertyAccess = Expression.Convert(propertyAccess, typeof(object));
         }
 
-        // Only box value types, reference types don't need conversion
-        var finalExpression = propertyAccess.Type.IsValueType
-            ? Expression.Convert(propertyAccess, typeof(object))
-            : (Expression)propertyAccess;
+		// Final expression - propertyAccess should already be object? at this point
+		var finalExpression = propertyAccess;
 
         return Expression.Lambda<Func<object, object?>>(finalExpression, parameter).Compile();
     }
 
     /// <summary>
-    /// Compiles a fast property setter with support for complex properties and value converters.
+	/// Compiles a fast property setter with support for complex properties.
+	/// Accepts raw model values (no converter applied - conversion happens at runtime).
     /// </summary>
     private static Action<object, object?> CompilePropertySetter<T>(IProperty property, System.Reflection.PropertyInfo clrProperty) where T : class
     {
@@ -285,9 +317,8 @@ internal static class EntityMetadataHelper
         Expression typedInstance;
 
         // Check if this is a complex property (EF Core 8+)
-        var complexProperty = property.DeclaringType as IComplexType;
 
-        if (complexProperty != null)
+		if (property.DeclaringType is IComplexType complexProperty)
         {
             // Handle nested complex property access: instance.ComplexProp.Property
             var complexPropInfo = complexProperty.ComplexProperty.PropertyInfo;
@@ -338,20 +369,6 @@ internal static class EntityMetadataHelper
             convertedValue = Expression.Convert(valueParam, propertyType);
         }
 
-        // Apply EF Core value converter if exists (convert from provider value back to model value)
-        var converter = property.GetValueConverter();
-        if (converter != null)
-        {
-            var convertMethod = converter.GetType().GetMethod("ConvertFromProvider",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
-
-            if (convertMethod != null)
-            {
-                var converterConstant = Expression.Constant(converter);
-                convertedValue = Expression.Call(converterConstant, convertMethod, convertedValue);
-            }
-        }
-
         // Create assignment: instance.Property = value
         var assignment = Expression.Assign(propertyAccess, convertedValue);
 
@@ -359,3 +376,4 @@ internal static class EntityMetadataHelper
     }
 
 }
+

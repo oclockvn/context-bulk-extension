@@ -1,8 +1,7 @@
 using System.Linq.Expressions;
+using ContextBulkExtension.Extensions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
-using ContextBulkExtension.Helpers;
-using ContextBulkExtension.Extensions;
 
 namespace ContextBulkExtension.Helpers;
 

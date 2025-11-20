@@ -6,6 +6,7 @@ namespace ContextBulkExtension.Helpers;
 /// <summary>
 /// Memory-efficient IDataReader implementation for streaming entities to SqlBulkCopy.
 /// Uses per-row value caching to avoid double property access (IsDBNull + typed getter).
+/// Applies value converters when reading values from entities (ConvertToProvider).
 /// </summary>
 internal class EntityDataReader<T>(IList<T> entities, IReadOnlyList<ColumnMetadata> columns, bool includeRowIndex = false) : DbDataReader where T : class
 {
@@ -60,6 +61,7 @@ internal class EntityDataReader<T>(IList<T> entities, IReadOnlyList<ColumnMetada
     /// <summary>
     /// Ensures all column values for the current row are loaded into cache.
     /// This prevents double property access (IsDBNull + typed getter both calling GetValue).
+	/// Applies ConvertToProvider for properties with value converters.
     /// </summary>
     private void EnsureRowValuesLoaded()
     {
@@ -80,7 +82,16 @@ internal class EntityDataReader<T>(IList<T> entities, IReadOnlyList<ColumnMetada
         var startIndex = includeRowIndex ? 1 : 0;
         for (int i = 0; i < columns.Count; i++)
         {
-            var value = columns[i].CompiledGetter(entity);
+			var column = columns[i];
+			var value = column.CompiledGetter(entity);
+
+			// Apply ConvertToProvider if column has converter
+			// Use column.ValueConverter directly instead of dictionary lookup for better performance
+			if (value != null && column.ValueConverter != null)
+			{
+				value = column.ValueConverter.ConvertToProvider.Invoke(value);
+			}
+
             _currentRowValues[startIndex + i] = value ?? DBNull.Value; // Box only once
         }
     }
@@ -117,7 +128,7 @@ internal class EntityDataReader<T>(IList<T> entities, IReadOnlyList<ColumnMetada
             return "Int32";
 
         var columnIndex = includeRowIndex ? ordinal - 1 : ordinal;
-        return columns[columnIndex].ClrType.Name;
+		return columns[columnIndex].ProviderClrType.Name;
     }
 
     public override Type GetFieldType(int ordinal)
@@ -126,7 +137,8 @@ internal class EntityDataReader<T>(IList<T> entities, IReadOnlyList<ColumnMetada
             return typeof(int);
 
         var columnIndex = includeRowIndex ? ordinal - 1 : ordinal;
-        return columns[columnIndex].ClrType;
+		// Use ProviderClrType (database type) for DataTable column type resolution
+		return columns[columnIndex].ProviderClrType;
     }
 
     public override bool IsDBNull(int ordinal)
