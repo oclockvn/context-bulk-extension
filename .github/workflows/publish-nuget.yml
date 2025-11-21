@@ -6,10 +6,11 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version to publish (e.g., 1.0.0)'
+      patch_number:
+        description: 'Patch number for fixes (default: 0, increment for each fix at same EF Core version)'
         required: false
         type: string
+        default: '0'
 
 jobs:
   publish:
@@ -47,41 +48,58 @@ jobs:
         run: |
           set -e
           
-          # Extract version from tag or input
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          else
-            # Handle both v8.1.0 and 8.1.0 tag formats
-            TAG_VERSION=$(echo "${{ github.ref }}" | sed 's/refs\/tags\/v\?//')
-            VERSION="$TAG_VERSION"
-          fi
+          # Extract EF Core version from project file
+          EFCORE_VERSION=$(grep 'Microsoft\.EntityFrameworkCore\.SqlServer' NugetPackages/${{ matrix.package }}.csproj | sed -n 's/.*Version="\([0-9]\+\.[0-9]\+\.[0-9]\+\)".*/\1/p' | head -1)
           
-          # Validate semantic version format (X.Y.Z)
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Error: Invalid version format: $VERSION"
-            echo "Expected format: X.Y.Z (e.g., 8.1.0)"
+          if [ -z "$EFCORE_VERSION" ]; then
+            echo "Error: Could not extract EF Core version from project file"
             exit 1
           fi
           
-          # Extract BaseVersion (everything after major version)
-          BaseVersion=$(echo "$VERSION" | cut -d. -f2-)
+          echo "EF Core version: $EFCORE_VERSION"
+          
+          # Extract patch number (revision) from input or default to 0
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            PATCH_NUMBER="${{ github.event.inputs.patch_number }}"
+            if [ -z "$PATCH_NUMBER" ]; then
+              PATCH_NUMBER="0"
+            fi
+          else
+            PATCH_NUMBER="0"
+          fi
+          
+          # Validate patch number is numeric
+          if ! echo "$PATCH_NUMBER" | grep -qE '^[0-9]+$'; then
+            echo "Error: Invalid patch number: $PATCH_NUMBER"
+            echo "Patch number must be a non-negative integer"
+            exit 1
+          fi
+          
+          # Construct full version: EF Core version + patch number
+          VERSION="${EFCORE_VERSION}.${PATCH_NUMBER}"
+          
+          # Extract BaseVersion (everything after major version) for MSBuild
+          BaseVersion=$(echo "$EFCORE_VERSION" | cut -d. -f2-)
           
           if [ -z "$BaseVersion" ]; then
-            echo "Error: Failed to extract BaseVersion from $VERSION"
+            echo "Error: Failed to extract BaseVersion from $EFCORE_VERSION"
             exit 1
           fi
           
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "BaseVersion=$BaseVersion" >> $GITHUB_OUTPUT
+          echo "PatchNumber=$PATCH_NUMBER" >> $GITHUB_OUTPUT
           echo "Determined version: $VERSION"
           echo "BaseVersion: $BaseVersion"
+          echo "Patch number: $PATCH_NUMBER"
 
       - name: Build project
         run: |
           dotnet build NugetPackages/${{ matrix.package }}.csproj \
             --configuration Release \
             --no-incremental \
-            -p:BaseVersion=${{ steps.version.outputs.BaseVersion }}
+            -p:BaseVersion=${{ steps.version.outputs.BaseVersion }} \
+            -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
 
       - name: Pack NuGet package
         run: |
@@ -89,7 +107,8 @@ jobs:
             --configuration Release \
             --no-build \
             --output ./artifacts \
-            -p:BaseVersion=${{ steps.version.outputs.BaseVersion }}
+            -p:BaseVersion=${{ steps.version.outputs.BaseVersion }} \
+            -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
 
       - name: Validate package
         run: |

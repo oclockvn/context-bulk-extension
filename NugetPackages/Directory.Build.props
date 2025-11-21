@@ -19,23 +19,27 @@
         <NoWarn>$(NoWarn);CS1591</NoWarn>
     </PropertyGroup>
     
+    <PropertyGroup>
+        <PatchNumber Condition="'$(PatchNumber)' == ''">0</PatchNumber>
+    </PropertyGroup>
+    
     <Choose>
         <When Condition="$(MSBuildProjectName.Contains('v8'))">
             <PropertyGroup>
-                <Version>8.$(BaseVersion)</Version>
+                <Version>8.$(BaseVersion).$(PatchNumber)</Version>
                 <TargetFramework>net8.0</TargetFramework>
                 <DefineConstants>$(DefineConstants);V8</DefineConstants>
-                <AssemblyVersion>8.$(BaseVersion).0</AssemblyVersion>
-                <FileVersion>8.$(BaseVersion).0</FileVersion>
+                <AssemblyVersion>8.$(BaseVersion).$(PatchNumber).0</AssemblyVersion>
+                <FileVersion>8.$(BaseVersion).$(PatchNumber).0</FileVersion>
             </PropertyGroup>
         </When>
         <When Condition="$(MSBuildProjectName.Contains('v9'))">
             <PropertyGroup>
-                <Version>9.$(BaseVersion)</Version>
+                <Version>9.$(BaseVersion).$(PatchNumber)</Version>
                 <TargetFramework>net9.0</TargetFramework>
                 <DefineConstants>$(DefineConstants);V9</DefineConstants>
-                <AssemblyVersion>9.$(BaseVersion).0</AssemblyVersion>
-                <FileVersion>9.$(BaseVersion).0</FileVersion>
+                <AssemblyVersion>9.$(BaseVersion).$(PatchNumber).0</AssemblyVersion>
+                <FileVersion>9.$(BaseVersion).$(PatchNumber).0</FileVersion>
             </PropertyGroup>
         </When>
         <Otherwise>
