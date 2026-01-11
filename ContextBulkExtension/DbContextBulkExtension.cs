@@ -36,19 +36,47 @@ public static partial class DbContextBulkExtensionUpsert
     /// <typeparam name="T">The entity type</typeparam>
     /// <param name="context">The DbContext instance</param>
     /// <param name="entities">The entities to insert</param>
-    /// <param name="options">Configuration options for the bulk insert operation</param>
+	/// <param name="config">Configuration options for the bulk insert operation</param>
     /// <param name="cancellationToken">The cancellation token</param>
     /// <exception cref="ArgumentNullException">Thrown when context, entities, or options is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity type is not part of the model or database provider is not SQL Server</exception>
-    public static async Task BulkInsertAsync<T>(this DbContext context, IList<T> entities, BulkConfig options, CancellationToken cancellationToken = default) where T : class
+	public static async Task BulkInsertAsync<T>(this DbContext context, IList<T> entities, BulkConfig config, CancellationToken cancellationToken = default) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(config);
 
         // Early return for empty collections
         if (entities.Count == 0)
             return;
+
+        // If identity output is requested, use BulkUpsert with InsertOnly mode
+        // This leverages the MERGE OUTPUT clause to retrieve generated identity values
+        if (config.IdentityOutput)
+        {
+            var upsertConfig = new BulkConfig
+            {
+                BatchSize = config.BatchSize,
+                TimeoutSeconds = config.TimeoutSeconds,
+                EnableStreaming = config.EnableStreaming,
+                UseTableLock = config.UseTableLock,
+                CheckConstraints = config.CheckConstraints,
+                FireTriggers = config.FireTriggers,
+                IdentityOutput = true,
+                InsertOnly = true  // Ensures no UPDATE clause in MERGE
+            };
+
+            await BulkUpsertInternalAsync(
+                context,
+                entities,
+                matchOn: null,
+                updateColumns: null,
+                deleteScope: null,
+                upsertConfig,
+                deleteNotMatchedBySource: false,
+                cancellationToken);
+            return;
+        }
 
         // Get connection and validate SQL Server
         var dbConnection = context.Database.GetDbConnection();
@@ -60,7 +88,7 @@ public static partial class DbContextBulkExtensionUpsert
 
         // Get metadata (always exclude identity columns - let SQL Server auto-generate them)
         var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: false);
-
+        var cachedMetadata = EntityMetadataHelper.GetCachedMetadata<T>(context);
         var tableName = EntityMetadataHelper.GetTableName<T>(context);
 
         // Ensure connection is open using EF Core's connection management
@@ -80,21 +108,21 @@ public static partial class DbContextBulkExtensionUpsert
             // Configure SqlBulkCopy
             var bulkCopyOptions = SqlBulkCopyOptions.Default;
 
-            if (options.CheckConstraints)
+            if (config.CheckConstraints)
                 bulkCopyOptions |= SqlBulkCopyOptions.CheckConstraints;
 
-            if (options.FireTriggers)
+            if (config.FireTriggers)
                 bulkCopyOptions |= SqlBulkCopyOptions.FireTriggers;
 
-            if (options.UseTableLock)
+            if (config.UseTableLock)
                 bulkCopyOptions |= SqlBulkCopyOptions.TableLock;
 
             using var bulkCopy = new SqlBulkCopy(connection, bulkCopyOptions, sqlTransaction)
             {
                 DestinationTableName = tableName,
-                BatchSize = options.BatchSize,
-                BulkCopyTimeout = options.TimeoutSeconds,
-                EnableStreaming = options.EnableStreaming
+                BatchSize = config.BatchSize,
+                BulkCopyTimeout = config.TimeoutSeconds,
+                EnableStreaming = config.EnableStreaming
             };
 
             Debug.WriteLine($"[BULK] BulkInsertAsync inserting {entities.Count} entities into {tableName} with {columns.Count} columns");
@@ -130,7 +158,7 @@ public static partial class DbContextBulkExtensionUpsert
     /// <param name="entities">The entities to upsert</param>
     /// <param name="matchOn">Expression specifying which columns to match on. Use single property (x => x.Email) or anonymous type (x => new { x.Email, x.Username }). If null (default), primary keys will be used.</param>
     /// <param name="updateColumns">Expression specifying which columns to update on match. Use single property (x => x.Status) or anonymous type (x => new { x.Name, x.UpdatedAt }). If null (default), all non-key columns will be updated.</param>
-    /// <param name="options">Configuration options for the bulk upsert operation. If null, default options will be used.</param>
+	/// <param name="config">Configuration options for the bulk upsert operation. If null, default options will be used.</param>
     /// <param name="cancellationToken">The cancellation token</param>
     /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity has no primary key (and matchOn is null), entity type is not part of the model, or database provider is not SQL Server</exception>
@@ -139,9 +167,9 @@ public static partial class DbContextBulkExtensionUpsert
         IList<T> entities,
         System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null,
         System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null,
-        BulkConfig? options = null,
+        BulkConfig? config = null,
         CancellationToken cancellationToken = default) where T : class
-        => BulkUpsertInternalAsync(context, entities, matchOn, updateColumns, deleteScope: null, options, deleteNotMatchedBySource: false, cancellationToken);
+        => BulkUpsertInternalAsync(context, entities, matchOn, updateColumns, deleteScope: null, config, deleteNotMatchedBySource: false, cancellationToken);
 
     /// <summary>
     /// Performs a high-performance bulk upsert (insert or update) of entities using SqlBulkCopy with MERGE statement.
@@ -159,7 +187,7 @@ public static partial class DbContextBulkExtensionUpsert
     /// <param name="updateColumns">Expression specifying which columns to update on match. Use single property (x => x.Status) or anonymous type (x => new { x.Name, x.UpdatedAt }). If null (default), all non-key columns will be updated.</param>
     /// <param name="deleteScope">
     /// Optional expression to scope which records can be deleted.
-    /// Example: x => x.AccountId == 123 &amp; x.UpdatedUtc > DateTime.UtcNow.AddDays(-1)
+	/// Example: x => x.DocumentId == 123
     /// <para>
     /// <strong>⚠️ CRITICAL:</strong> When deleteScope is null, ALL records in the target table
     /// that don't match ANY row in the source batch will be deleted. Use with extreme caution!
@@ -192,14 +220,14 @@ public static partial class DbContextBulkExtensionUpsert
         System.Linq.Expressions.Expression<Func<T, object>>? matchOn,
         System.Linq.Expressions.Expression<Func<T, object>>? updateColumns,
         System.Linq.Expressions.Expression<Func<T, bool>>? deleteScope,
-        BulkConfig? options,
+        BulkConfig? config,
         bool deleteNotMatchedBySource,
         CancellationToken cancellationToken) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
 
-        options ??= new BulkConfig();
+        config ??= new BulkConfig();
 
         // Early return for empty collections
         if (entities.Count == 0)
@@ -249,6 +277,7 @@ public static partial class DbContextBulkExtensionUpsert
 
         // For upsert, always include all columns (including identity) in temp table
         var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
+        var cachedMetadata = EntityMetadataHelper.GetCachedMetadata<T>(context);
         var tableName = EntityMetadataHelper.GetTableName<T>(context);
 
         // Ensure connection is open using EF Core's connection management
@@ -269,8 +298,8 @@ public static partial class DbContextBulkExtensionUpsert
             }
 
             // Check if we need to sync identity values
-            var identityColumns = options.IdentityOutput ? EntityMetadataHelper.GetIdentityColumns<T>(context) : null;
-            var needsIdentitySync = identityColumns?.Count > 0 && options.IdentityOutput;
+            var identityColumns = config.IdentityOutput ? EntityMetadataHelper.GetIdentityColumns<T>(context) : null;
+            var needsIdentitySync = identityColumns?.Count > 0 && config.IdentityOutput;
 
             // Step 1: Create temp staging table
             var createTempTableSql = BuildCreateTempTableSql(tempTableName, columns, needsIdentitySync);
@@ -284,18 +313,18 @@ public static partial class DbContextBulkExtensionUpsert
                 // Step 2: Bulk insert to temp table (always with KeepIdentity for temp table)
                 var bulkCopyOptions = SqlBulkCopyOptions.KeepIdentity;
 
-                if (options.UseTableLock)
+                if (config.UseTableLock)
                     bulkCopyOptions |= SqlBulkCopyOptions.TableLock;
 
-                if (options.CheckConstraints)
+                if (config.CheckConstraints)
                     bulkCopyOptions |= SqlBulkCopyOptions.CheckConstraints;
 
                 using var bulkCopy = new SqlBulkCopy(connection, bulkCopyOptions, sqlTransaction)
                 {
                     DestinationTableName = tempTableName,
-                    BatchSize = options.BatchSize,
-                    BulkCopyTimeout = options.TimeoutSeconds,
-                    EnableStreaming = options.EnableStreaming
+                    BatchSize = config.BatchSize,
+                    BulkCopyTimeout = config.TimeoutSeconds,
+                    EnableStreaming = config.EnableStreaming
                 };
 
                 // Map columns (add row index mapping if needed)
@@ -329,23 +358,23 @@ public static partial class DbContextBulkExtensionUpsert
                 }
 
                 // Step 5: Execute MERGE statement with custom match columns
-                var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, updateColumnNames, options, identityColumns, deleteNotMatchedBySource, deleteScopeSql);
+                var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, updateColumnNames, config, identityColumns, deleteNotMatchedBySource, deleteScopeSql);
 
                 // Debug: Print generated SQL
 #if DEBUG
                 Debug.WriteLine("=== GENERATED MERGE SQL ===");
-                Debug.WriteLine($"[BULK] BulkUpsertAsync merging {entities.Count} entities into {tableName} with {columns.Count} columns, options: {options}");
+                Debug.WriteLine($"[BULK] BulkUpsertAsync merging {entities.Count} entities into {tableName} with {columns.Count} columns, options: {config}");
                 Debug.WriteLine(mergeSql);
                 Debug.WriteLine("=========================");
 #endif
 
                 using var mergeCmd = new SqlCommand(mergeSql, connection, sqlTransaction);
-                mergeCmd.CommandTimeout = options.TimeoutSeconds;
+                mergeCmd.CommandTimeout = config.TimeoutSeconds;
 
                 // Add deleteScope parameters if any
                 if (deleteScopeParameters?.Count > 0)
                 {
-                    mergeCmd.Parameters.AddRange(deleteScopeParameters.ToArray());
+                    mergeCmd.Parameters.AddRange([.. deleteScopeParameters]);
                 }
 
                 // If identity sync is enabled, read OUTPUT results and sync back to entities
@@ -372,6 +401,13 @@ public static partial class DbContextBulkExtensionUpsert
                             {
                                 var identityColumn = identityColumns[i];
                                 var identityValue = outputReader.GetValue(i + 1);
+
+                                // Apply ConvertFromProvider if identity column has converter
+                                // Add defensive null check for DBNull.Value (unlikely but safer)
+                                if (identityValue != null && identityValue != DBNull.Value && identityColumn.ValueConverter != null)
+                                {
+                                    identityValue = identityColumn.ValueConverter.ConvertFromProvider.Invoke(identityValue);
+                                }
 
                                 // Use compiled setter to set the identity value
                                 identityColumn.CompiledSetter(entity, identityValue);
@@ -491,7 +527,7 @@ public static partial class DbContextBulkExtensionUpsert
             if (updateColumnNames?.Count > 0)
             {
                 var updateNamesSet = new HashSet<string>(updateColumnNames, StringComparer.OrdinalIgnoreCase);
-                updateColumns = updateColumns.Where(c => updateNamesSet.Contains(c.PropertyInfo.Name)).ToList();
+                updateColumns = [.. updateColumns.Where(c => updateNamesSet.Contains(c.PropertyInfo.Name))];
             }
 
             if (updateColumns.Count > 0)
@@ -566,7 +602,6 @@ public static partial class DbContextBulkExtensionUpsert
 
         return sql.ToString();
     }
-
 
     /// <summary>
     /// Extracts property names from a MatchOn expression.

@@ -1,3 +1,6 @@
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using System.Collections.Generic;
+
 namespace ContextBulkExtension.Helpers;
 
 /// <summary>
@@ -31,4 +34,19 @@ internal class CachedEntityMetadata(List<ColumnMetadata> allColumns)
     /// Full table name including schema.
     /// </summary>
     public required string TableName { get; init; }
+
+    /// <summary>
+    /// Dictionary mapping property name to column name for properties with value converters.
+    /// </summary>
+    public required IReadOnlyDictionary<string, string> ConvertiblePropertyColumnDict { get; init; }
+
+    /// <summary>
+    /// Dictionary mapping column name to value converter for columns with converters.
+    /// </summary>
+    public required IReadOnlyDictionary<string, ValueConverter> ConvertibleColumnConverterDict { get; init; }
+
+    /// <summary>
+    /// Value converter for identity column (if any). Null if identity column has no converter.
+    /// </summary>
+    public ValueConverter? IdentityColumnConverter { get; init; }
 }
