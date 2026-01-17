@@ -47,8 +47,8 @@
         <Version>8.$(BaseVersion).$(PatchNumber)</Version>
         <TargetFramework>net8.0</TargetFramework>
         <DefineConstants>$(DefineConstants);V8</DefineConstants>
-        <AssemblyVersion>8.$(BaseVersion).$(PatchNumber).0</AssemblyVersion>
-        <FileVersion>8.$(BaseVersion).$(PatchNumber).0</FileVersion>
+        <AssemblyVersion>8.$(BaseVersion).$(PatchNumber)</AssemblyVersion>
+        <FileVersion>8.$(BaseVersion).$(PatchNumber)</FileVersion>
         <PackageOutputPath>$(SolutionDir)Nugets\net8</PackageOutputPath>
     </PropertyGroup>
 
@@ -57,8 +57,8 @@
         <Version>10.$(BaseVersion).$(PatchNumber)</Version>
         <TargetFramework>net10.0</TargetFramework>
         <DefineConstants>$(DefineConstants);V10</DefineConstants>
-        <AssemblyVersion>10.$(BaseVersion).$(PatchNumber).0</AssemblyVersion>
-        <FileVersion>10.$(BaseVersion).$(PatchNumber).0</FileVersion>
+        <AssemblyVersion>10.$(BaseVersion).$(PatchNumber)</AssemblyVersion>
+        <FileVersion>10.$(BaseVersion).$(PatchNumber)</FileVersion>
         <PackageOutputPath>$(SolutionDir)Nugets\net10</PackageOutputPath>
     </PropertyGroup>
 
