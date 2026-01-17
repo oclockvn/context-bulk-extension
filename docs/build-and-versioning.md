@@ -538,6 +538,37 @@ dotnet msbuild ContextBulkExtension/ContextBulkExtension.Net8.csproj \
 ```
 Should output: `true`
 
+### Issue: Package validation fails with "NU3004: The package is not signed"
+
+**Error Message:**
+```
+error: NU3004: The package is not signed.
+Package signature validation failed.
+```
+
+**Cause:**
+- May occur when using `GeneratePackageOnBuild=True` vs explicit `dotnet pack`
+- `dotnet pack` and build-time package generation handle package metadata differently
+
+**Solution:**
+- Use explicit `dotnet pack` command instead of relying on `GeneratePackageOnBuild`
+- This matches the working workflow approach
+
+**Local testing:**
+```bash
+# Build first
+dotnet build ContextBulkExtension/ContextBulkExtension.Net8.csproj --configuration Release
+
+# Then pack explicitly
+dotnet pack ContextBulkExtension/ContextBulkExtension.Net8.csproj \
+  --configuration Release \
+  --no-build \
+  --output ./artifacts
+
+# Validate
+dotnet nuget verify ./artifacts/*.nupkg --all
+```
+
 ---
 
 ## Reference

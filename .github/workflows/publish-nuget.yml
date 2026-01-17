@@ -85,10 +85,13 @@ jobs:
             --no-incremental \
             -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
 
-      - name: Collect NuGet packages
+      - name: Pack NuGet package
         run: |
-          mkdir -p ./artifacts
-          cp ContextBulkExtension/Nugets/net8/*.nupkg ./artifacts/
+          dotnet pack ContextBulkExtension/ContextBulkExtension.Net8.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./artifacts \
+            -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
 
       - name: Validate package
         run: |
@@ -214,10 +217,13 @@ jobs:
             --no-incremental \
             -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
 
-      - name: Collect NuGet packages
+      - name: Pack NuGet package
         run: |
-          mkdir -p ./artifacts
-          cp ContextBulkExtension/Nugets/net10/*.nupkg ./artifacts/
+          dotnet pack ContextBulkExtension/ContextBulkExtension.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./artifacts \
+            -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
 
       - name: Validate package
         run: |

@@ -324,6 +324,46 @@ The new architecture makes it trivial to add .NET 12 support:
 
 ---
 
+## Additional Fixes
+
+### ✅ Solution 6: Use Explicit `dotnet pack` Command
+
+**Issue:** GitHub Actions failed with `NU3004: The package is not signed` error when using `GeneratePackageOnBuild`.
+
+**Root Cause Analysis:**
+- Current workflow relied on `GeneratePackageOnBuild=True` in Directory.Build.props
+- Working commit (`6ea1e78`) used explicit `dotnet pack` command
+- `dotnet pack` and build-time package generation may handle package metadata differently
+
+**Solution:** Revert to explicit `dotnet pack` (matches working commit)
+
+**Changes:**
+```yaml
+# Before (relying on GeneratePackageOnBuild)
+- name: Build project
+  run: dotnet build ... -p:PatchNumber=...
+
+- name: Collect NuGet packages
+  run: cp ContextBulkExtension/Nugets/net8/*.nupkg ./artifacts/
+
+# After (explicit pack)
+- name: Build project
+  run: dotnet build ... -p:PatchNumber=...
+
+- name: Pack NuGet package
+  run: |
+    dotnet pack ContextBulkExtension/ContextBulkExtension.Net8.csproj \
+      --configuration Release \
+      --no-build \
+      --output ./artifacts \
+      -p:PatchNumber=...
+```
+
+**Files Changed:**
+- `.github/workflows/publish-nuget.yml` (lines 88-94, 221-227)
+
+---
+
 ## Verification Checklist
 
 Before merging to main:
@@ -331,6 +371,7 @@ Before merging to main:
 - [x] Local MSBuild evaluation produces correct versions
 - [x] Act workflow simulation succeeds for .NET 8
 - [ ] Act workflow simulation succeeds for .NET 10
+- [x] Package validation fix applied (removed --all flag)
 - [ ] GitHub Actions workflow runs successfully
 - [ ] Packages published to NuGet.org with correct versions
 - [ ] Documentation updated and reviewed
