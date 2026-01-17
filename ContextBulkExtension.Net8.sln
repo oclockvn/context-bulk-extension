@@ -6,8 +6,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension", "Con
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension.Tests.Net8", "ContextBulkExtension.Tests\ContextBulkExtension.Tests.Net8.csproj", "{E6BE8417-9A3B-814F-F1F9-1B9765FFFA25}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension.SqlServer", "NugetPackages\ContextBulkExtension.SqlServer\ContextBulkExtension.SqlServer.Net8.csproj", "{0E7B7103-1EE1-5905-AF43-3CD2C9B1052B}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -22,10 +20,6 @@ Global
 		{E6BE8417-9A3B-814F-F1F9-1B9765FFFA25}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E6BE8417-9A3B-814F-F1F9-1B9765FFFA25}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E6BE8417-9A3B-814F-F1F9-1B9765FFFA25}.Release|Any CPU.Build.0 = Release|Any CPU
-		{0E7B7103-1EE1-5905-AF43-3CD2C9B1052B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{0E7B7103-1EE1-5905-AF43-3CD2C9B1052B}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{0E7B7103-1EE1-5905-AF43-3CD2C9B1052B}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{0E7B7103-1EE1-5905-AF43-3CD2C9B1052B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

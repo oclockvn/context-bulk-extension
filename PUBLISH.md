@@ -29,7 +29,7 @@ Use the automated script to publish a new version:
 ```
 
 The script will:
-1. Update `BaseVersion` in `NugetPackages/Directory.Build.props`
+1. Update `BaseVersion` in `Directory.Build.props`
 2. Build the projects (unless `-SkipBuild` is specified)
 3. Run tests (unless `-SkipTest` is specified)
 4. Create a git tag (e.g., `v1.0.0`)
@@ -37,7 +37,7 @@ The script will:
 
 #### Option 2: Manual Process
 
-1. Update `BaseVersion` in `NugetPackages/Directory.Build.props`:
+1. Update `BaseVersion` in `Directory.Build.props`:
    ```xml
    <BaseVersion>1.0</BaseVersion>  <!-- For version 8.1.0 -->
    ```

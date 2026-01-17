@@ -24,24 +24,6 @@
         <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     </PropertyGroup>
     
-    <!-- Conditional PackageId generation based on provider -->
-    <Choose>
-        <When Condition="$(MSBuildProjectName.Contains('SqlServer'))">
-            <PropertyGroup>
-                <Title>$(Title).SqlServer</Title>
-                <PackageId>$(BasePackageId).SqlServer</PackageId>
-            </PropertyGroup>
-        </When>
-        <When Condition="$(MSBuildProjectName.Contains('Postgres'))">
-            <PropertyGroup>
-                <Title>$(Title).Postgres</Title>
-                <PackageId>$(BasePackageId).Postgres</PackageId>
-            </PropertyGroup>
-        </When>
-        <Otherwise>
-        </Otherwise>
-    </Choose>
-
     <!-- .NET 8 specific configuration -->
     <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('Net8'))">
         <Version>8.$(BaseVersion).$(PatchNumber)</Version>
@@ -71,8 +53,8 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Include="..\README.md" PackagePath="" Pack="True"/>
-        <Content Include="..\LICENSE" Link="LICENSE" Pack="true" PackagePath="LICENSE"/>
+        <None Include="$(MSBuildThisFileDirectory)README.md" PackagePath="" Pack="True"/>
+        <Content Include="$(MSBuildThisFileDirectory)LICENSE" Link="LICENSE" Pack="true" PackagePath="LICENSE"/>
     </ItemGroup>
 
     <!-- Exclude test files if any are included -->

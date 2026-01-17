@@ -1,8 +1,4 @@
 <Solution>
-  <Folder Name="/NugetPackages/">
-    <Project Path="NugetPackages/ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.csproj" Id="9b10eab3-43d2-4a92-90e2-775d735ba07d" />
-    <Project Path="NugetPackages/ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.Net8.csproj" />
-  </Folder>
   <Project Path="ContextBulkExtension.Tests/ContextBulkExtension.Tests.csproj" Id="f73601e7-99be-40ad-9b83-19336348a6af" />
   <Project Path="ContextBulkExtension.Tests/ContextBulkExtension.Tests.Net8.csproj" />
   <Project Path="ContextBulkExtension/ContextBulkExtension.csproj" />
