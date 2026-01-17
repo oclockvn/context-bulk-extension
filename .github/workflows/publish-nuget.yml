@@ -24,15 +24,15 @@ jobs:
         include:
           - name: net8
             solution: ContextBulkExtension.Net8.sln
-            csproj: NugetPackages/ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.Net8.csproj
+            csproj: ContextBulkExtension/ContextBulkExtension.Net8.csproj
             dotnet-version: '8.0.x'
-            package-name: ContextBulkExtension.SqlServer
+            package-name: ContextBulkExtension
             output-path: Nugets/net8
           - name: net10
             solution: ContextBulkExtension.sln
-            csproj: NugetPackages/ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.csproj
+            csproj: ContextBulkExtension/ContextBulkExtension.csproj
             dotnet-version: '10.0.x'
-            package-name: ContextBulkExtension.SqlServer
+            package-name: ContextBulkExtension
             output-path: Nugets/net10
     
     steps:
