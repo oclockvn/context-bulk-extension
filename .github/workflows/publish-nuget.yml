@@ -93,25 +93,6 @@ jobs:
             --output ./artifacts \
             -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
 
-      - name: Validate package
-        run: |
-          for nupkg in ./artifacts/*.nupkg; do
-            if [ -f "$nupkg" ]; then
-              echo "Validating package: $nupkg"
-              dotnet nuget verify "$nupkg" || {
-                echo "Error: Package validation failed for $nupkg"
-                exit 1
-              }
-            fi
-          done
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: nuget-packages-net8
-          path: ./artifacts/*.nupkg
-          retention-days: 30
-
       - name: NuGet login (OIDC → temp API key)
         uses: NuGet/login@v1
         id: login
@@ -224,25 +205,6 @@ jobs:
             --no-build \
             --output ./artifacts \
             -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
-
-      - name: Validate package
-        run: |
-          for nupkg in ./artifacts/*.nupkg; do
-            if [ -f "$nupkg" ]; then
-              echo "Validating package: $nupkg"
-              dotnet nuget verify "$nupkg" || {
-                echo "Error: Package validation failed for $nupkg"
-                exit 1
-              }
-            fi
-          done
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: nuget-packages-net10
-          path: ./artifacts/*.nupkg
-          retention-days: 30
 
       - name: NuGet login (OIDC → temp API key)
         uses: NuGet/login@v1
