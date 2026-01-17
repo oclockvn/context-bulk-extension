@@ -13,28 +13,13 @@ on:
         default: '0'
 
 jobs:
-  publish:
+  build-net8:
+    name: Build and Publish .NET 8 Package
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
-    
-    strategy:
-      matrix:
-        include:
-          - name: net8
-            solution: ContextBulkExtension.Net8.sln
-            csproj: ContextBulkExtension/ContextBulkExtension.Net8.csproj
-            dotnet-version: '8.0.x'
-            package-name: ContextBulkExtension
-            output-path: Nugets/net8
-          - name: net10
-            solution: ContextBulkExtension.sln
-            csproj: ContextBulkExtension/ContextBulkExtension.csproj
-            dotnet-version: '10.0.x'
-            package-name: ContextBulkExtension
-            output-path: Nugets/net10
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -44,31 +29,22 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: ${{ matrix.dotnet-version }}
+          dotnet-version: '8.0.x'
 
       - name: Cache NuGet packages
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.props') }}
+          key: ${{ runner.os }}-nuget-net8-${{ hashFiles('**/*.csproj', '**/*.props') }}
           restore-keys: |
+            ${{ runner.os }}-nuget-net8-
             ${{ runner.os }}-nuget-
 
       - name: Determine version
         id: version
         run: |
           set -e
-          
-          # Extract EF Core version from project file
-          EFCORE_VERSION=$(grep 'Microsoft\.EntityFrameworkCore\.SqlServer' ${{ matrix.csproj }} | sed -n 's/.*Version="\([0-9]\+\.[0-9]\+\.[0-9]\+\)".*/\1/p' | head -1)
-          
-          if [ -z "$EFCORE_VERSION" ]; then
-            echo "Error: Could not extract EF Core version from project file"
-            exit 1
-          fi
-          
-          echo "EF Core version: $EFCORE_VERSION"
-          
+
           # Extract patch number (revision) from input or default to 0
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             PATCH_NUMBER="${{ github.event.inputs.patch_number }}"
@@ -78,44 +54,41 @@ jobs:
           else
             PATCH_NUMBER="0"
           fi
-          
+
           # Validate patch number is numeric
           if ! echo "$PATCH_NUMBER" | grep -qE '^[0-9]+$'; then
             echo "Error: Invalid patch number: $PATCH_NUMBER"
             echo "Patch number must be a non-negative integer"
             exit 1
           fi
-          
-          # Construct full version: EF Core version + patch number
-          VERSION="${EFCORE_VERSION}.${PATCH_NUMBER}"
-          
-          # Extract BaseVersion (everything after major version) for MSBuild
-          BaseVersion=$(echo "$EFCORE_VERSION" | cut -d. -f2-)
-          
-          if [ -z "$BaseVersion" ]; then
-            echo "Error: Failed to extract BaseVersion from $EFCORE_VERSION"
+
+          # Use MSBuild to evaluate the Version property
+          VERSION=$(dotnet msbuild ContextBulkExtension/ContextBulkExtension.Net8.csproj \
+            -getProperty:Version \
+            -p:PatchNumber=$PATCH_NUMBER \
+            -nologo)
+
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not determine version from project"
             exit 1
           fi
-          
+
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "BaseVersion=$BaseVersion" >> $GITHUB_OUTPUT
           echo "PatchNumber=$PATCH_NUMBER" >> $GITHUB_OUTPUT
-          echo "Determined version: $VERSION"
-          echo "BaseVersion: $BaseVersion"
+          echo "Determined version: $VERSION (via MSBuild)"
           echo "Patch number: $PATCH_NUMBER"
 
-      - name: Build solution
+      - name: Build project
         run: |
-          dotnet build ${{ matrix.solution }} \
+          dotnet build ContextBulkExtension/ContextBulkExtension.Net8.csproj \
             --configuration Release \
             --no-incremental \
-            -p:BaseVersion=${{ steps.version.outputs.BaseVersion }} \
             -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
 
       - name: Collect NuGet packages
         run: |
           mkdir -p ./artifacts
-          cp ${{ matrix.output-path }}/*.nupkg ./artifacts/ || echo "No packages found in ${{ matrix.output-path }}"
+          cp ContextBulkExtension/Nugets/net8/*.nupkg ./artifacts/
 
       - name: Validate package
         run: |
@@ -132,7 +105,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: nuget-packages-${{ matrix.name }}
+          name: nuget-packages-net8
           path: ./artifacts/*.nupkg
           retention-days: 30
 
@@ -151,15 +124,16 @@ jobs:
 
       - name: Generate job summary
         run: |
-          PACKAGE_NAME="${{ matrix.package-name }}"
+          PACKAGE_NAME="ContextBulkExtension"
           PACKAGE_VERSION="${{ steps.version.outputs.version }}"
           NUGET_URL="https://www.nuget.org/packages/${PACKAGE_NAME}/${PACKAGE_VERSION}"
-          
+
           {
-            echo "## 📦 Published NuGet Package"
+            echo "## 📦 Published .NET 8 NuGet Package"
             echo ""
             echo "**Package:** \`${PACKAGE_NAME}\`"
             echo "**Version:** \`${PACKAGE_VERSION}\`"
+            echo "**Target:** .NET 8 / EF Core 8.x"
             echo "**NuGet.org:** [View Package](${NUGET_URL})"
             echo ""
             echo "### Package Details"
@@ -168,3 +142,131 @@ jobs:
             echo "- Published: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           } >> $GITHUB_STEP_SUMMARY
 
+  build-net10:
+    name: Build and Publish .NET 10 Package
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-net10-${{ hashFiles('**/*.csproj', '**/*.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-net10-
+            ${{ runner.os }}-nuget-
+
+      - name: Determine version
+        id: version
+        run: |
+          set -e
+
+          # Extract patch number (revision) from input or default to 0
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            PATCH_NUMBER="${{ github.event.inputs.patch_number }}"
+            if [ -z "$PATCH_NUMBER" ]; then
+              PATCH_NUMBER="0"
+            fi
+          else
+            PATCH_NUMBER="0"
+          fi
+
+          # Validate patch number is numeric
+          if ! echo "$PATCH_NUMBER" | grep -qE '^[0-9]+$'; then
+            echo "Error: Invalid patch number: $PATCH_NUMBER"
+            echo "Patch number must be a non-negative integer"
+            exit 1
+          fi
+
+          # Use MSBuild to evaluate the Version property
+          VERSION=$(dotnet msbuild ContextBulkExtension/ContextBulkExtension.csproj \
+            -getProperty:Version \
+            -p:PatchNumber=$PATCH_NUMBER \
+            -nologo)
+
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not determine version from project"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "PatchNumber=$PATCH_NUMBER" >> $GITHUB_OUTPUT
+          echo "Determined version: $VERSION (via MSBuild)"
+          echo "Patch number: $PATCH_NUMBER"
+
+      - name: Build project
+        run: |
+          dotnet build ContextBulkExtension/ContextBulkExtension.csproj \
+            --configuration Release \
+            --no-incremental \
+            -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
+
+      - name: Collect NuGet packages
+        run: |
+          mkdir -p ./artifacts
+          cp ContextBulkExtension/Nugets/net10/*.nupkg ./artifacts/
+
+      - name: Validate package
+        run: |
+          for nupkg in ./artifacts/*.nupkg; do
+            if [ -f "$nupkg" ]; then
+              echo "Validating package: $nupkg"
+              dotnet nuget verify "$nupkg" --all || {
+                echo "Error: Package validation failed for $nupkg"
+                exit 1
+              }
+            fi
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: nuget-packages-net10
+          path: ./artifacts/*.nupkg
+          retention-days: 30
+
+      - name: NuGet login (OIDC → temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: oclockvn
+
+      - name: Push package to NuGet
+        run: |
+          dotnet nuget push ./artifacts/*.nupkg \
+            --api-key ${{ steps.login.outputs.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Generate job summary
+        run: |
+          PACKAGE_NAME="ContextBulkExtension"
+          PACKAGE_VERSION="${{ steps.version.outputs.version }}"
+          NUGET_URL="https://www.nuget.org/packages/${PACKAGE_NAME}/${PACKAGE_VERSION}"
+
+          {
+            echo "## 📦 Published .NET 10 NuGet Package"
+            echo ""
+            echo "**Package:** \`${PACKAGE_NAME}\`"
+            echo "**Version:** \`${PACKAGE_VERSION}\`"
+            echo "**Target:** .NET 10 / EF Core 10.x"
+            echo "**NuGet.org:** [View Package](${NUGET_URL})"
+            echo ""
+            echo "### Package Details"
+            echo "- Package ID: \`${PACKAGE_NAME}\`"
+            echo "- Version: \`${PACKAGE_VERSION}\`"
+            echo "- Published: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          } >> $GITHUB_STEP_SUMMARY

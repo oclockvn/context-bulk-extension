@@ -26,6 +26,8 @@
     
     <!-- .NET 8 specific configuration -->
     <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('Net8'))">
+        <!-- Note: Can override BaseVersion here for Net8-specific versioning if needed -->
+        <!-- Example: <BaseVersion>0.21</BaseVersion> would produce 8.0.21.X -->
         <Version>8.$(BaseVersion).$(PatchNumber)</Version>
         <TargetFramework>net8.0</TargetFramework>
         <DefineConstants>$(DefineConstants);V8</DefineConstants>
@@ -36,6 +38,8 @@
 
     <!-- .NET 10 specific configuration (default) -->
     <PropertyGroup Condition="!$(MSBuildProjectName.EndsWith('Net8'))">
+        <!-- Note: Can override BaseVersion here for Net10-specific versioning if needed -->
+        <!-- Example: <BaseVersion>0.1</BaseVersion> would produce 10.0.1.X -->
         <Version>10.$(BaseVersion).$(PatchNumber)</Version>
         <TargetFramework>net10.0</TargetFramework>
         <DefineConstants>$(DefineConstants);V10</DefineConstants>
