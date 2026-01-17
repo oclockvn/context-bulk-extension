@@ -98,7 +98,7 @@ jobs:
           for nupkg in ./artifacts/*.nupkg; do
             if [ -f "$nupkg" ]; then
               echo "Validating package: $nupkg"
-              dotnet nuget verify "$nupkg" --all || {
+              dotnet nuget verify "$nupkg" || {
                 echo "Error: Package validation failed for $nupkg"
                 exit 1
               }
@@ -230,7 +230,7 @@ jobs:
           for nupkg in ./artifacts/*.nupkg; do
             if [ -f "$nupkg" ]; then
               echo "Validating package: $nupkg"
-              dotnet nuget verify "$nupkg" --all || {
+              dotnet nuget verify "$nupkg" || {
                 echo "Error: Package validation failed for $nupkg"
                 exit 1
               }
