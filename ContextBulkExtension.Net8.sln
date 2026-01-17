@@ -2,9 +2,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension", "ContextBulkExtension\ContextBulkExtension.csproj", "{CC3B92B4-A92C-A559-D618-13CDFFAE3E5A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension", "ContextBulkExtension\ContextBulkExtension.Net8.csproj", "{CC3B92B4-A92C-A559-D618-13CDFFAE3E5A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension.Tests", "ContextBulkExtension.Tests\ContextBulkExtension.Tests.csproj", "{E6BE8417-9A3B-814F-F1F9-1B9765FFFA25}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension.Tests.Net8", "ContextBulkExtension.Tests\ContextBulkExtension.Tests.Net8.csproj", "{E6BE8417-9A3B-814F-F1F9-1B9765FFFA25}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

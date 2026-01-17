@@ -21,8 +21,19 @@ jobs:
     
     strategy:
       matrix:
-        package:
-          - ContextBulkExtension.SqlServer.v8
+        include:
+          - name: net8
+            solution: ContextBulkExtension.Net8.sln
+            csproj: ContextBulkExtension/ContextBulkExtension.Net8.csproj
+            dotnet-version: '8.0.x'
+            package-name: ContextBulkExtension
+            output-path: Nugets/net8
+          - name: net10
+            solution: ContextBulkExtension.sln
+            csproj: ContextBulkExtension/ContextBulkExtension.csproj
+            dotnet-version: '10.0.x'
+            package-name: ContextBulkExtension
+            output-path: Nugets/net10
     
     steps:
       - name: Checkout code
@@ -33,7 +44,7 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v5
         with:
-          global-json-file: './global.json'
+          dotnet-version: ${{ matrix.dotnet-version }}
 
       - name: Cache NuGet packages
         uses: actions/cache@v4
@@ -49,7 +60,7 @@ jobs:
           set -e
           
           # Extract EF Core version from project file
-          EFCORE_VERSION=$(grep 'Microsoft\.EntityFrameworkCore\.SqlServer' NugetPackages/${{ matrix.package }}.csproj | sed -n 's/.*Version="\([0-9]\+\.[0-9]\+\.[0-9]\+\)".*/\1/p' | head -1)
+          EFCORE_VERSION=$(grep 'Microsoft\.EntityFrameworkCore\.SqlServer' ${{ matrix.csproj }} | sed -n 's/.*Version="\([0-9]\+\.[0-9]\+\.[0-9]\+\)".*/\1/p' | head -1)
           
           if [ -z "$EFCORE_VERSION" ]; then
             echo "Error: Could not extract EF Core version from project file"
@@ -93,22 +104,18 @@ jobs:
           echo "BaseVersion: $BaseVersion"
           echo "Patch number: $PATCH_NUMBER"
 
-      - name: Build project
+      - name: Build solution
         run: |
-          dotnet build NugetPackages/${{ matrix.package }}.csproj \
+          dotnet build ${{ matrix.solution }} \
             --configuration Release \
             --no-incremental \
             -p:BaseVersion=${{ steps.version.outputs.BaseVersion }} \
             -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
 
-      - name: Pack NuGet package
+      - name: Collect NuGet packages
         run: |
-          dotnet pack NugetPackages/${{ matrix.package }}.csproj \
-            --configuration Release \
-            --no-build \
-            --output ./artifacts \
-            -p:BaseVersion=${{ steps.version.outputs.BaseVersion }} \
-            -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
+          mkdir -p ./artifacts
+          cp ${{ matrix.output-path }}/*.nupkg ./artifacts/ || echo "No packages found in ${{ matrix.output-path }}"
 
       - name: Validate package
         run: |
@@ -125,7 +132,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: nuget-packages
+          name: nuget-packages-${{ matrix.name }}
           path: ./artifacts/*.nupkg
           retention-days: 30
 
@@ -144,7 +151,7 @@ jobs:
 
       - name: Generate job summary
         run: |
-          PACKAGE_NAME="${{ matrix.package }}"
+          PACKAGE_NAME="${{ matrix.package-name }}"
           PACKAGE_VERSION="${{ steps.version.outputs.version }}"
           NUGET_URL="https://www.nuget.org/packages/${PACKAGE_NAME}/${PACKAGE_VERSION}"
           

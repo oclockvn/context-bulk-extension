@@ -6,22 +6,24 @@ High-performance bulk operations for Entity Framework Core using SQL Server's Sq
 
 Install the NuGet package that matches your EF Core version:
 
-[![Downloads](https://img.shields.io/nuget/dt/ContextBulkExtension.SqlServer.v8)](https://www.nuget.org/packages/ContextBulkExtension.SqlServer.v8/)
+[![Downloads](https://img.shields.io/nuget/dt/ContextBulkExtension)](https://www.nuget.org/packages/ContextBulkExtension/)
 
 ```bash
-# For EF Core 8.x
-dotnet add package ContextBulkExtension.SqlServer.v8
+# For EF Core 8.x (.NET 8)
+dotnet add package ContextBulkExtension --version 8.0.20
+
+# For EF Core 10.x (.NET 10)
+dotnet add package ContextBulkExtension --version 10.0.20
 ```
 
 ## Package Structure
 
-This library provides separate NuGet packages for different EF Core versions and providers:
+This library provides separate NuGet packages for different .NET and EF Core versions:
 
-- **ContextBulkExtension.SqlServer.v8** - For Entity Framework Core 8.x with SQL Server
-- **ContextBulkExtension.SqlServer.v9** - For Entity Framework Core 9.x with SQL Server (coming soon)
-- **ContextBulkExtension.Postgres.v8** - For Entity Framework Core 8.x with PostgreSQL (coming soon)
+- **ContextBulkExtension** version **8.x.x** - For .NET 8 and Entity Framework Core 8.x with SQL Server
+- **ContextBulkExtension** version **10.x.x** - For .NET 10 and Entity Framework Core 10.x with SQL Server
 
-Each package pins a specific EF Core version to ensure compatibility. Choose the package that matches your EF Core version.
+The package uses version-based separation: version numbers starting with `8.` target .NET 8, while versions starting with `10.` target .NET 10. Both versions share the same PackageId (`ContextBulkExtension`) but have different version numbers to ensure compatibility with the correct .NET and EF Core versions.
 
 ## Usage
 

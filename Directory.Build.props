@@ -1,0 +1,68 @@
+<Project>
+    <PropertyGroup>
+        <Title>ContextBulkExtension</Title>
+        <BasePackageId>ContextBulkExtension</BasePackageId>
+        <PackageId>$(BasePackageId)</PackageId>
+        <BaseVersion>0.20</BaseVersion>
+        <Nullable>enable</Nullable>
+        <Authors>oclockvn</Authors>
+        <Description>High-performance bulk operations for Entity Framework Core using SQL Server's SqlBulkCopy. Designed for efficiently inserting millions of records.</Description>
+        <PackageProjectUrl>https://github.com/oclockvn/context-bulk-extension</PackageProjectUrl>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <PackageTags>EntityFrameworkCore Entity Framework Core EFCore EF Core SQL Server Bulk Batch Extensions Insert Update Delete</PackageTags>
+        <RepositoryUrl>https://github.com/oclockvn/context-bulk-extension</RepositoryUrl>
+        <RepositoryType>Git</RepositoryType>
+        <AllowedOutputExtensionsInPackageBuildOutputFolder>$(AllowedOutputExtensionsInPackageBuildOutputFolder);.pdb</AllowedOutputExtensionsInPackageBuildOutputFolder>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <LangVersion>latest</LangVersion>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <NoWarn>$(NoWarn);CS1591</NoWarn>
+    </PropertyGroup>
+    
+    <PropertyGroup>
+        <PatchNumber Condition="'$(PatchNumber)' == ''">0</PatchNumber>
+        <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    </PropertyGroup>
+    
+    <!-- .NET 8 specific configuration -->
+    <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('Net8'))">
+        <Version>8.$(BaseVersion).$(PatchNumber)</Version>
+        <TargetFramework>net8.0</TargetFramework>
+        <DefineConstants>$(DefineConstants);V8</DefineConstants>
+        <AssemblyVersion>8.$(BaseVersion).$(PatchNumber)</AssemblyVersion>
+        <FileVersion>8.$(BaseVersion).$(PatchNumber)</FileVersion>
+        <PackageOutputPath>$(SolutionDir)Nugets\net8</PackageOutputPath>
+    </PropertyGroup>
+
+    <!-- .NET 10 specific configuration (default) -->
+    <PropertyGroup Condition="!$(MSBuildProjectName.EndsWith('Net8'))">
+        <Version>10.$(BaseVersion).$(PatchNumber)</Version>
+        <TargetFramework>net10.0</TargetFramework>
+        <DefineConstants>$(DefineConstants);V10</DefineConstants>
+        <AssemblyVersion>10.$(BaseVersion).$(PatchNumber)</AssemblyVersion>
+        <FileVersion>10.$(BaseVersion).$(PatchNumber)</FileVersion>
+        <PackageOutputPath>$(SolutionDir)Nugets\net10</PackageOutputPath>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <EnablePackageValidation>true</EnablePackageValidation>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="$(MSBuildThisFileDirectory)README.md" PackagePath="" Pack="True"/>
+        <Content Include="$(MSBuildThisFileDirectory)LICENSE" Link="LICENSE" Pack="true" PackagePath="LICENSE"/>
+    </ItemGroup>
+
+    <!-- Exclude test files if any are included -->
+    <ItemGroup>
+        <Compile Remove="..\**\*Tests.cs" />
+        <Compile Remove="..\**\*Test.cs" />
+        <Compile Remove="..\**\TestEntities\**" />
+        <Compile Remove="..\**\Fixtures\**" />
+    </ItemGroup>
+
+</Project>

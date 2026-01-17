@@ -22,7 +22,7 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
 }
 
 $BaseVersion = $Version -replace '^\d+\.', ''
-$DirectoryBuildPropsPath = "NugetPackages\Directory.Build.props"
+$DirectoryBuildPropsPath = "Directory.Build.props"
 
 Write-Host "Publishing NuGet package version: $Version" -ForegroundColor Cyan
 Write-Host "BaseVersion will be set to: $BaseVersion" -ForegroundColor Cyan
