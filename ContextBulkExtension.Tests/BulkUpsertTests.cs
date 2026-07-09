@@ -108,6 +108,47 @@ public class BulkUpsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFi
     }
 
     [Fact]
+    public async Task BulkUpsertAsync_WithSingleExistingEntity_ShouldUpdateWithoutDuplicate()
+    {
+        // Arrange
+        var initialEntity = new SimpleEntity
+        {
+            Name = "Original Name",
+            Value = 100,
+            CreatedAt = DateTime.UtcNow.AddDays(-1)
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync([initialEntity]);
+        }
+
+        var dbEntity = (await _fixture.GetAllEntitiesAsync<SimpleEntity>()).Single();
+        var originalId = dbEntity.Id;
+
+        var upsertEntity = new SimpleEntity
+        {
+            Id = originalId,
+            Name = "Updated Single",
+            Value = 999,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        // Act
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync([upsertEntity]);
+        }
+
+        // Assert
+        var allEntities = await _fixture.GetAllEntitiesAsync<SimpleEntity>();
+        Assert.Single(allEntities);
+        Assert.Equal(originalId, allEntities[0].Id);
+        Assert.Equal("Updated Single", allEntities[0].Name);
+        Assert.Equal(999, allEntities[0].Value);
+    }
+
+    [Fact]
     public async Task BulkUpsertAsync_WithCompositeKey_ShouldUpsertCorrectly()
     {
         // Arrange - Insert initial data
@@ -182,7 +223,7 @@ public class BulkUpsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFi
         // Act - Use fresh context for upsert
         await using (var context2 = _fixture.CreateNewContext())
         {
-            await context2.BulkUpsertAsync(existingEntities, options: options);
+            await context2.BulkUpsertAsync(existingEntities, config: options);
         }
 
         // Assert - Use fresh context to verify
@@ -480,7 +521,7 @@ public class BulkUpsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFi
         // Act - Match on Email with InsertOnly
         await using (var context = _fixture.CreateNewContext())
         {
-            await context.BulkUpsertAsync(upsertUsers, matchOn: x => x.Email, options: options);
+            await context.BulkUpsertAsync(upsertUsers, matchOn: x => x.Email, config: options);
         }
 
         // Assert
@@ -707,7 +748,7 @@ public class BulkUpsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFi
 
         await using (var context = _fixture.CreateNewContext())
         {
-            await context.BulkUpsertAsync(entities1, options: options1);
+            await context.BulkUpsertAsync(entities1, config: options1);
         }
 
         Assert.All(entities1, e => Assert.True(e.Id > 0, "Entity ID should be synced from database"));
@@ -736,7 +777,7 @@ public class BulkUpsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFi
 
         await using (var context = _fixture.CreateNewContext())
         {
-            await context.BulkUpsertAsync(entities2, options: options2);
+            await context.BulkUpsertAsync(entities2, config: options2);
         }
 
         Assert.All(entities2, e => Assert.Equal(0, e.Id));
@@ -788,7 +829,7 @@ public class BulkUpsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFi
 
         await using (var context = _fixture.CreateNewContext())
         {
-            await context.BulkUpsertAsync(allEntities, options: options);
+            await context.BulkUpsertAsync(allEntities, config: options);
         }
 
         for (int i = 0; i < existingEntities.Count; i++)
@@ -828,7 +869,7 @@ public class BulkUpsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFi
 
         await using (var context = _fixture.CreateNewContext())
         {
-            await context.BulkUpsertAsync(mixedUsers, matchOn: x => x.Email, options: options);
+            await context.BulkUpsertAsync(mixedUsers, matchOn: x => x.Email, config: options);
         }
 
         Assert.All(mixedUsers, u => Assert.True(u.Id > 0, $"User {u.Email} should have ID synced"));
@@ -880,7 +921,7 @@ public class BulkUpsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFi
 
         await using (var context = _fixture.CreateNewContext())
         {
-            await context.BulkUpsertAsync(updateUsers, matchOn: x => x.Email, options: options);
+            await context.BulkUpsertAsync(updateUsers, matchOn: x => x.Email, config: options);
         }
 
         // Assert - Updated entities should have their IDs synced from database
@@ -929,7 +970,7 @@ public class BulkUpsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFi
 
         await using (var context = _fixture.CreateNewContext())
         {
-            await context.BulkUpsertAsync(mixedEntities, options: options);
+            await context.BulkUpsertAsync(mixedEntities, config: options);
         }
 
         var allEntities = await _fixture.GetAllEntitiesAsync<CompositeKeyEntity>();
@@ -953,7 +994,7 @@ public class BulkUpsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFi
 
         await using (var context = _fixture.CreateNewContext())
         {
-            await context.BulkUpsertAsync(largeEntities, options: options);
+            await context.BulkUpsertAsync(largeEntities, config: options);
         }
 
         Assert.All(largeEntities, e => Assert.True(e.Id > 0));
@@ -989,7 +1030,7 @@ public class BulkUpsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFi
         // Act
         await using (var context = _fixture.CreateNewContext())
         {
-            await context.BulkUpsertAsync(upsertUsers, matchOn: x => x.Email, options: options);
+            await context.BulkUpsertAsync(upsertUsers, matchOn: x => x.Email, config: options);
         }
 
         // Assert - Only user2 should have ID synced (it was inserted)
@@ -999,6 +1040,91 @@ public class BulkUpsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFi
         var allUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
         Assert.Equal(2, allUsers.Count);
         Assert.Contains(allUsers, u => u.Id == user2.Id && u.Email == "user2@test.com");
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithIdentityOutputAndInsertOnly_SingleExisting_ShouldSyncId()
+    {
+        // Arrange - Insert initial data
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "single@test.com", Username = "user1", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        var dbUser = (await _fixture.GetAllEntitiesAsync<UserEntity>()).Single();
+        var dbId = dbUser.Id;
+
+        var upsertUsers = new List<UserEntity>
+        {
+            new() { Email = "single@test.com", Username = "updated", FirstName = "Updated", LastName = "Name", Points = 999, IsActive = false, RegisteredAt = DateTime.UtcNow }
+        };
+
+        Assert.Equal(0, upsertUsers[0].Id);
+
+        var options = new BulkConfig { InsertOnly = true, IdentityOutput = true };
+
+        // Act
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(upsertUsers, matchOn: x => x.Email, config: options);
+        }
+
+        // Assert - existing row should have ID synced even though no UPDATE ran
+        Assert.Equal(dbId, upsertUsers[0].Id);
+
+        var allUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Single(allUsers);
+        Assert.Equal("user1", allUsers[0].Username);
+        Assert.Equal(100, allUsers[0].Points);
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithIdentityOutputAndInsertOnly_AllExisting_ShouldSyncAllIds()
+    {
+        // Arrange - Insert initial data
+        var initialUsers = new List<UserEntity>
+        {
+            new() { Email = "all1@test.com", Username = "user1", FirstName = "John", LastName = "Doe", Points = 100, IsActive = true, RegisteredAt = DateTime.UtcNow },
+            new() { Email = "all2@test.com", Username = "user2", FirstName = "Jane", LastName = "Smith", Points = 200, IsActive = true, RegisteredAt = DateTime.UtcNow }
+        };
+
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkInsertAsync(initialUsers);
+        }
+
+        var dbUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        var dbId1 = dbUsers.First(u => u.Email == "all1@test.com").Id;
+        var dbId2 = dbUsers.First(u => u.Email == "all2@test.com").Id;
+
+        var upsertUsers = new List<UserEntity>
+        {
+            new() { Email = "all1@test.com", Username = "updated1", FirstName = "Updated", LastName = "One", Points = 999, IsActive = false, RegisteredAt = DateTime.UtcNow },
+            new() { Email = "all2@test.com", Username = "updated2", FirstName = "Updated", LastName = "Two", Points = 888, IsActive = false, RegisteredAt = DateTime.UtcNow }
+        };
+
+        Assert.All(upsertUsers, u => Assert.Equal(0, u.Id));
+
+        var options = new BulkConfig { InsertOnly = true, IdentityOutput = true };
+
+        // Act
+        await using (var context = _fixture.CreateNewContext())
+        {
+            await context.BulkUpsertAsync(upsertUsers, matchOn: x => x.Email, config: options);
+        }
+
+        // Assert - all existing rows should have IDs synced
+        Assert.Equal(dbId1, upsertUsers.First(u => u.Email == "all1@test.com").Id);
+        Assert.Equal(dbId2, upsertUsers.First(u => u.Email == "all2@test.com").Id);
+
+        var allUsers = await _fixture.GetAllEntitiesAsync<UserEntity>();
+        Assert.Equal(2, allUsers.Count);
+        Assert.DoesNotContain(allUsers, u => u.Username.StartsWith("updated"));
     }
 
 
