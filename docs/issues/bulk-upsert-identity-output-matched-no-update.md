@@ -1,6 +1,6 @@
 # BulkUpsertAsync + IdentityOutput: identity not synced when all rows already exist and no UPDATE runs
 
-**Status:** Validated (branch `bugfix/upsert-single-item`, code review + regression tests added)
+**Status:** Fixed (Sol 1 on branch `bugfix/upsert-single-item`)
 
 ## Summary
 
@@ -21,7 +21,7 @@ await context.BulkUpsertAsync(
     config: new BulkConfig { InsertOnly = true, IdentityOutput = true });
 
 // Expected: items[0].Id == DB id
-// Actual:   items[0].Id == 0
+// Actual (before fix): items[0].Id == 0
 ```
 
 Same with a normal upsert if `BuildMergeSql` skips `WHEN MATCHED` (`updateColumns.Count == 0`).
@@ -44,7 +44,7 @@ OUTPUT source.__RowIndex, INSERTED.Id, $action
 
 Sync loop only runs on OUTPUT rows ([`DbContextBulkExtension.cs`](../ContextBulkExtension/DbContextBulkExtension.cs) ~381–416). No action → no row → Id never set.
 
-`BuildMergeSql` only emits `WHEN MATCHED` when `!InsertOnly` **and** `updateColumns.Count > 0` (~514–545).
+`BuildMergeSql` only emits a real `WHEN MATCHED` when `!InsertOnly` **and** `updateColumns.Count > 0` (~514–545).
 
 **Extra blast radius:** `BulkInsertAsync` with `IdentityOutput` redirects to `BulkUpsertInternalAsync` with `InsertOnly = true` (~53–77). Pure inserts (PK=0) never match, so inserts still work; the bug hits upsert InsertOnly / ensure-exists paths.
 
@@ -53,61 +53,43 @@ Sync loop only runs on OUTPUT rows ([`DbContextBulkExtension.cs`](../ContextBulk
 Mixed batch (1 exist + 1 new): OUTPUT has an insert row → looks “half OK”.  
 Only existing / no update: **empty OUTPUT** → total IdentityOutput miss.
 
+## Fix (Solution 1 — implemented)
+
+When `IdentityOutput && identityColumns.Count > 0` and no real `WHEN MATCHED` was added, emit:
+
+```sql
+DECLARE @dummy INT;
+...
+WHEN MATCHED THEN UPDATE SET @dummy = 0
+```
+
+Forces OUTPUT `UPDATE` rows so existing sync loop works unchanged. See `needsDummyMatchedForIdentityOutput` in [`DbContextBulkExtension.cs`](../ContextBulkExtension/DbContextBulkExtension.cs).
+
+### Limitation
+
+Dummy `WHEN MATCHED` UPDATE can fire AFTER UPDATE triggers on the target table. MERGE `OUTPUT` without `INTO` also fails when the target has triggers. Workaround: avoid `IdentityOutput` on trigger tables for ensure-exists paths, or later adopt Solution 2 (post-MERGE SELECT).
+
 ## Validation
 
 | Check | Result |
 |-------|--------|
-| Code path review | Confirmed — `WHEN MATCHED` omitted under `InsertOnly`; sync reads OUTPUT only |
-| Regression tests added | `BulkUpsertAsync_WithIdentityOutputAndInsertOnly_SingleExisting_ShouldSyncId`, `..._AllExisting_ShouldSyncAllIds` in [`BulkUpsertTests.cs`](../ContextBulkExtension.Tests/BulkUpsertTests.cs) |
-| Test run (local) | Compiles; requires Docker (Testcontainers). When Docker available, tests **expected to fail** on `Assert.Equal(dbId, upsertUsers[0].Id)` with actual `0` |
-
-## Gap in tests (before fix)
-
-`BulkUpsertAsync_WithIdentityOutputAndInsertOnly_ShouldSyncOnlyInserted` uses 1 exist + 1 new; asserts **only** the new Id. No case: **all matched + no UPDATE + IdentityOutput**.
+| Code path review | Confirmed — dummy MATCHED when IdentityOutput and no real update |
+| Regression tests | `..._InsertOnly_SingleExisting_ShouldSyncId`, `..._AllExisting_ShouldSyncAllIds`, mixed batch asserts matched Id, `..._EmptyUpdateColumns_ShouldSyncId` in [`BulkUpsertTests.cs`](../ContextBulkExtension.Tests/BulkUpsertTests.cs) |
+| Test run | Requires Docker (Testcontainers) |
 
 ## Expected behavior
 
 With `IdentityOutput=true`, matched rows still get identity back even when no column UPDATE.
 
-## Proposed solutions (max 3)
-
-### Solution 1 — Dummy `WHEN MATCHED` when `IdentityOutput` and no real update (recommended)
-
-When `IdentityOutput && identityColumns.Count > 0` and (`InsertOnly` or `updateColumns.Count == 0`), emit:
-
-```sql
-WHEN MATCHED THEN UPDATE SET @dummy = 0
-```
-
-Forces OUTPUT `UPDATE` rows so existing sync loop works unchanged.
-
-| Pros | Cons |
-|------|------|
-| Tiny change in `BuildMergeSql` only | Dummy UPDATE may fire UPDATE triggers / bump rowversion |
-| Reuses OUTPUT + existing reader loop | Extra write intent vs pure no-op |
-| Covers InsertOnly + empty update set | Must avoid invalid `SET col = col` on computed/rowversion cols |
+## Alternate solutions (not implemented)
 
 ### Solution 2 — Post-MERGE SELECT for rows missing from OUTPUT
 
-After MERGE reader, if any entity still has default identity, `SELECT` join temp→target on match keys, map `__RowIndex` → Id.
-
-| Pros | Cons |
-|------|------|
-| No dummy UPDATE / no trigger side effects | Second round-trip; more code paths |
-| True no-op for matched rows | Must keep temp table until after SELECT |
-| Clear semantics | Easy to get wrong with composite match / value converters |
+After MERGE reader, if any entity still has default identity, `SELECT` join temp→target on match keys, map `__RowIndex` → Id. Prefer if UPDATE triggers / rowversion must not fire on ensure-exists.
 
 ### Solution 3 — Split path: INSERT-only MERGE + separate identity lookup
 
-Keep MERGE insert-only; for `IdentityOutput`, always `SELECT` identities for all source rows via temp join (ignore `$action`). Optionally skip OUTPUT for InsertOnly.
-
-| Pros | Cons |
-|------|------|
-| One consistent sync mechanism for InsertOnly | Bigger refactor; may duplicate sync logic |
-| Avoids MERGE OUTPUT quirks | Extra SQL on every IdentityOutput call |
-| Fits `BulkInsertAsync` IdentityOutput redirect | Overkill if only InsertOnly edge needed |
-
-**Recommendation:** Solution 1 for a follow-up fix PR. Use Solution 2 if UPDATE triggers / rowversion must not fire on ensure-exists.
+Keep MERGE insert-only; for `IdentityOutput`, always `SELECT` identities for all source rows via temp join. Bigger refactor.
 
 ## Severity
 
