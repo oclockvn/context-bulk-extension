@@ -511,6 +511,7 @@ public static partial class DbContextBulkExtensionUpsert
         sql.AppendLine();
 
         // WHEN MATCHED clause (update)
+        var matchedClauseAdded = false;
         if (!options.InsertOnly)
         {
             // Determine which columns to update (exclude identity columns and match columns)
@@ -542,7 +543,19 @@ public static partial class DbContextBulkExtensionUpsert
                     sql.Append($"{columnName} = source.{columnName}");
                 }
                 sql.AppendLine();
+                matchedClauseAdded = true;
             }
+        }
+
+        // ponytail: IdentityOutput needs OUTPUT rows for matched no-op paths; dummy UPDATE SET @dummy avoids touching table columns
+        var needsDummyMatchedForIdentityOutput = !matchedClauseAdded
+            && options.IdentityOutput
+            && identityColumns?.Count > 0;
+
+        if (needsDummyMatchedForIdentityOutput)
+        {
+            sql.AppendLine("WHEN MATCHED THEN");
+            sql.AppendLine($"    UPDATE SET {BulkOperationConstants.MergeIdentitySyncDummyVariable} = 0");
         }
 
         // WHEN NOT MATCHED clause (insert)
@@ -599,6 +612,11 @@ public static partial class DbContextBulkExtensionUpsert
         }
 
         sql.AppendLine(";");
+
+        if (needsDummyMatchedForIdentityOutput)
+        {
+            return $"DECLARE {BulkOperationConstants.MergeIdentitySyncDummyVariable} INT;{Environment.NewLine}{sql}";
+        }
 
         return sql.ToString();
     }

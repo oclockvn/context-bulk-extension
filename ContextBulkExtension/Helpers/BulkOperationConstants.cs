@@ -39,4 +39,9 @@ internal static class BulkOperationConstants
     /// Name of the $action pseudo-column in MERGE OUTPUT clause.
     /// </summary>
     public const string MergeActionColumn = "$action";
+
+    /// <summary>
+    /// T-SQL variable used for no-op WHEN MATCHED updates to drive MERGE OUTPUT identity sync.
+    /// </summary>
+    public const string MergeIdentitySyncDummyVariable = "@dummy";
 }
