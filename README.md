@@ -1,29 +1,42 @@
 # EF Core Bulk Extension
 
-High-performance bulk operations for Entity Framework Core using SQL Server's SqlBulkCopy.
+High-performance bulk operations for Entity Framework Core (SQL Server and PostgreSQL).
+
+## Breaking change (provider packages)
+
+Package id `ContextBulkExtension` is **removed**. Install the provider you use:
+
+| Provider | Package |
+|----------|---------|
+| SQL Server | `ContextBulkExtension.SqlServer` |
+| PostgreSQL | `ContextBulkExtension.PostgreSql` |
+
+Both depend on `ContextBulkExtension.Core` (pulled transitively). Public API is unchanged: `BulkInsertAsync`, `BulkUpsertAsync`, `BulkUpsertWithDeleteScopeAsync`, `BulkConfig`.
 
 ## Installation
 
-Install the NuGet package that matches your EF Core version:
-
-[![Downloads](https://img.shields.io/nuget/dt/ContextBulkExtension)](https://www.nuget.org/packages/ContextBulkExtension/)
-
 ```bash
-# For EF Core 8.x (.NET 8)
-dotnet add package ContextBulkExtension --version 8.0.20
+# SQL Server — EF Core 8.x (.NET 8)
+dotnet add package ContextBulkExtension.SqlServer --version 8.0.20
 
-# For EF Core 10.x (.NET 10)
-dotnet add package ContextBulkExtension --version 10.0.20
+# SQL Server — EF Core 10.x (.NET 10)
+dotnet add package ContextBulkExtension.SqlServer --version 10.0.20
+
+# PostgreSQL — EF Core 8.x (.NET 8)
+dotnet add package ContextBulkExtension.PostgreSql --version 8.0.20
+
+# PostgreSQL — EF Core 10.x (.NET 10)
+dotnet add package ContextBulkExtension.PostgreSql --version 10.0.20
 ```
 
-## Package Structure
+Version prefix matches EF Core major: `8.x` → net8 / EF8, `10.x` → net10 / EF10.
 
-This library provides separate NuGet packages for different .NET and EF Core versions:
+## How it works
 
-- **ContextBulkExtension** version **8.x.x** - For .NET 8 and Entity Framework Core 8.x with SQL Server
-- **ContextBulkExtension** version **10.x.x** - For .NET 10 and Entity Framework Core 10.x with SQL Server
+- **SQL Server:** `SqlBulkCopy` + `MERGE` (temp staging)
+- **PostgreSQL:** binary `COPY` + staging `UPDATE`/`INSERT` (+ optional `DELETE NOT EXISTS` for delete-scope)
 
-The package uses version-based separation: version numbers starting with `8.` target .NET 8, while versions starting with `10.` target .NET 10. Both versions share the same PackageId (`ContextBulkExtension`) but have different version numbers to ensure compatibility with the correct .NET and EF Core versions.
+Postgres note: custom `matchOn` columns should have a unique index/constraint when you rely on uniqueness semantically (PK match works by default).
 
 ## Usage
 
@@ -34,8 +47,6 @@ DbContext db = GetYourDbContext();
 await db.BulkInsertAsync(entities);
 ```
 
-Uses SQL Server's `SqlBulkCopy` for high-performance bulk inserts. No SQL statement is generated - data is streamed directly to the server using the binary protocol.
-
 ### 2. Upsert with Default Compare
 
 ```cs
@@ -44,30 +55,6 @@ await db.BulkUpsertAsync(entities);
 ```
 
 Compares by primary key and updates all non-key properties.
-
-Generated sql:
-
-```sql
--- Creates temporary staging table
-CREATE TABLE #TempStaging_... (
-    [Id] INT,
-    [Name] NVARCHAR(200),
-    [Value] INT,
-    [CreatedAt] DATETIME2
-);
-
--- Bulk insert into staging table (using SqlBulkCopy)
-
--- MERGE statement
-MERGE [SimpleEntities] AS target
-USING #TempStaging_... AS source
-ON target.[Id] = source.[Id]
-WHEN MATCHED THEN
-    UPDATE SET [Name] = source.[Name], [Value] = source.[Value], [CreatedAt] = source.[CreatedAt]
-WHEN NOT MATCHED BY TARGET THEN
-    INSERT ([Name], [Value], [CreatedAt])
-    VALUES (source.[Name], source.[Value], source.[CreatedAt]);
-```
 
 ### 3. Upsert with Advanced Usage
 
@@ -81,44 +68,11 @@ await db.BulkUpsertAsync(
 );
 ```
 
-Compares by Email and Username, updates only LastLogin and Status properties.
-
-Generated sql:
-
-```sql
--- Creates temporary staging table
-CREATE TABLE #TempStaging_... (
-    [Id] INT,
-    [Email] NVARCHAR(255),
-    [Username] NVARCHAR(100),
-    [FirstName] NVARCHAR(100),
-    [LastName] NVARCHAR(100),
-    [LastLogin] DATETIME2,
-    [Status] NVARCHAR(50),
-    [RegisteredAt] DATETIME2
-);
-
--- Bulk insert into staging table (using SqlBulkCopy)
-
--- MERGE statement with custom match and update columns
-MERGE [UserEntities] AS target
-USING #TempStaging_... AS source
-ON target.[Email] = source.[Email] AND target.[Username] = source.[Username]
-WHEN MATCHED THEN
-    UPDATE SET [LastLogin] = source.[LastLogin], [Status] = source.[Status]
-WHEN NOT MATCHED BY TARGET THEN
-    INSERT ([Email], [Username], [FirstName], [LastName], [LastLogin], [Status], [RegisteredAt])
-    VALUES (source.[Email], source.[Username], source.[FirstName], source.[LastName], source.[LastLogin], source.[Status], source.[RegisteredAt]);
-```
-
 ### 4. Upsert with deletion
-
-Performs upsert operations and optionally deletes records in the target table that don't exist in the source batch.
 
 ```cs
 DbContext db = GetYourDbContext();
 
-// Delete records not in source, scoped to specific account
 await db.BulkUpsertWithDeleteScopeAsync(
     entities,
     matchOn: x => new { x.AccountId, x.Metric, x.Date },
@@ -126,46 +80,23 @@ await db.BulkUpsertWithDeleteScopeAsync(
 );
 ```
 
-**⚠️ Important:** When `deleteScope` is `null`, ALL records in the target table that don't match ANY row in the source batch will be deleted. Always provide a `deleteScope` to limit deletions to a specific subset (e.g., specific account, date range, or category).
-
-Generated sql:
-
-```sql
--- Creates temporary staging table
-CREATE TABLE #TempStaging_... (
-    [Id] INT,
-    [AccountId] INT,
-    [Metric] NVARCHAR(100),
-    [Date] DATETIME2,
-    [Value] DECIMAL(18,2),
-    [Category] NVARCHAR(100)
-);
-
--- Bulk insert into staging table (using SqlBulkCopy)
-
--- MERGE statement with deletion
-MERGE [MetricEntities] AS target
-USING #TempStaging_... AS source
-ON target.[AccountId] = source.[AccountId] 
-   AND target.[Metric] = source.[Metric] 
-   AND target.[Date] = source.[Date]
-WHEN MATCHED THEN
-    UPDATE SET [Value] = source.[Value], [Category] = source.[Category]
-WHEN NOT MATCHED BY TARGET THEN
-    INSERT ([AccountId], [Metric], [Date], [Value], [Category])
-    VALUES (source.[AccountId], source.[Metric], source.[Date], source.[Value], source.[Category])
-WHEN NOT MATCHED BY SOURCE AND [AccountId] = @p0 AND [Category] = @p1 THEN
-    DELETE;
-```
+**Warning:** When `deleteScope` is `null`, ALL target rows not present in the source batch are deleted. Prefer a scoped predicate.
 
 **Parameters:**
-- `matchOn`: Expression specifying which columns to match on (defaults to primary key)
-- `updateColumns`: Expression specifying which columns to update on match (defaults to all non-key columns)
-- `deleteScope`: **Optional** expression to scope which records can be deleted (e.g., `x => x.AccountId == 123`)
+- `matchOn`: match columns (default: primary key)
+- `updateColumns`: columns to update on match (default: all non-key)
+- `deleteScope`: optional filter for which unmatched target rows may be deleted
+
+## Package layout
+
+- `ContextBulkExtension.Core` — shared API + metadata
+- `ContextBulkExtension.SqlServer` — SQL Server provider
+- `ContextBulkExtension.PostgreSql` — PostgreSQL provider
 
 ## Roadmap
 
-- ~~[ ] BulkMerge~~ cancelled, use BulkUpsert instead
+- ~~BulkMerge~~ cancelled, use BulkUpsert instead
 - [x] Identity output
 - [x] Upsert with deletion
+- [x] PostgreSQL provider
 - [ ] Benchmark with large dataset and table with 20+ columns

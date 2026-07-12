@@ -1,6 +1,0 @@
-<Project>
-  <PropertyGroup Condition="'$(BuildingForTest)' == 'true'">
-  <!-- ponytail: NuGet restore needs unique PackageId when net8/net10 csproj share folder -->
-    <PackageId>$(MSBuildProjectName)</PackageId>
-  </PropertyGroup>
-</Project>

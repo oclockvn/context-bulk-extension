@@ -1,33 +1,20 @@
+using ContextBulkExtension.Abstractions;
+using ContextBulkExtension.Extensions;
+using ContextBulkExtension.Helpers;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using Microsoft.Data.SqlClient;
 using System.Data;
-using System.Text;
+using System.Data.Common;
 using System.Diagnostics;
-using ContextBulkExtension.Helpers;
-using ContextBulkExtension.Extensions;
+using System.Linq.Expressions;
+using System.Text;
 
-namespace ContextBulkExtension;
+namespace ContextBulkExtension.SqlServer;
 
-/// <summary>
-/// Extension methods for DbContext to perform high-performance bulk upsert operations.
-/// </summary>
-public static partial class DbContextBulkExtensionUpsert
+internal sealed class SqlServerBulkProvider : IBulkProvider
 {
-    /// <summary>
-    /// Performs a high-performance bulk insert of entities using SqlBulkCopy.
-    /// Suitable for inserting millions of records efficiently.
-    /// </summary>
-    /// <typeparam name="T">The entity type</typeparam>
-    /// <param name="context">The DbContext instance</param>
-    /// <param name="entities">The entities to insert</param>
-    /// <param name="cancellationToken">The cancellation token</param>
-    /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
-    /// <exception cref="InvalidOperationException">Thrown when entity type is not part of the model or database provider is not SQL Server</exception>
-    public static async Task BulkInsertAsync<T>(this DbContext context, IList<T> entities, CancellationToken cancellationToken = default) where T : class
-    {
-        await BulkInsertAsync(context, entities, new BulkConfig(), cancellationToken);
-    }
+    public bool Supports(DbConnection connection) => connection is SqlConnection;
 
     /// <summary>
     /// Performs a high-performance bulk insert of entities using SqlBulkCopy with custom options.
@@ -40,7 +27,11 @@ public static partial class DbContextBulkExtensionUpsert
     /// <param name="cancellationToken">The cancellation token</param>
     /// <exception cref="ArgumentNullException">Thrown when context, entities, or options is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when entity type is not part of the model or database provider is not SQL Server</exception>
-	public static async Task BulkInsertAsync<T>(this DbContext context, IList<T> entities, BulkConfig config, CancellationToken cancellationToken = default) where T : class
+	public async Task BulkInsertAsync<T>(
+        DbContext context,
+        IList<T> entities,
+        BulkConfig config,
+        CancellationToken cancellationToken) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
@@ -49,34 +40,6 @@ public static partial class DbContextBulkExtensionUpsert
         // Early return for empty collections
         if (entities.Count == 0)
             return;
-
-        // If identity output is requested, use BulkUpsert with InsertOnly mode
-        // This leverages the MERGE OUTPUT clause to retrieve generated identity values
-        if (config.IdentityOutput)
-        {
-            var upsertConfig = new BulkConfig
-            {
-                BatchSize = config.BatchSize,
-                TimeoutSeconds = config.TimeoutSeconds,
-                EnableStreaming = config.EnableStreaming,
-                UseTableLock = config.UseTableLock,
-                CheckConstraints = config.CheckConstraints,
-                FireTriggers = config.FireTriggers,
-                IdentityOutput = true,
-                InsertOnly = true  // Ensures no UPDATE clause in MERGE
-            };
-
-            await BulkUpsertInternalAsync(
-                context,
-                entities,
-                matchOn: null,
-                updateColumns: null,
-                deleteScope: null,
-                upsertConfig,
-                deleteNotMatchedBySource: false,
-                cancellationToken);
-            return;
-        }
 
         // Get connection and validate SQL Server
         var dbConnection = context.Database.GetDbConnection();
@@ -150,84 +113,21 @@ public static partial class DbContextBulkExtensionUpsert
     }
 
     /// <summary>
-    /// Performs a high-performance bulk upsert (insert or update) of entities using SqlBulkCopy with MERGE statement.
-    /// Inserts new records and updates existing records based on custom match columns or primary key matching.
-    /// </summary>
-    /// <typeparam name="T">The entity type</typeparam>
-    /// <param name="context">The DbContext instance</param>
-    /// <param name="entities">The entities to upsert</param>
-    /// <param name="matchOn">Expression specifying which columns to match on. Use single property (x => x.Email) or anonymous type (x => new { x.Email, x.Username }). If null (default), primary keys will be used.</param>
-    /// <param name="updateColumns">Expression specifying which columns to update on match. Use single property (x => x.Status) or anonymous type (x => new { x.Name, x.UpdatedAt }). If null (default), all non-key columns will be updated.</param>
-	/// <param name="config">Configuration options for the bulk upsert operation. If null, default options will be used.</param>
-    /// <param name="cancellationToken">The cancellation token</param>
-    /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
-    /// <exception cref="InvalidOperationException">Thrown when entity has no primary key (and matchOn is null), entity type is not part of the model, or database provider is not SQL Server</exception>
-    public static Task BulkUpsertAsync<T>(
-        this DbContext context,
-        IList<T> entities,
-        System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null,
-        System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null,
-        BulkConfig? config = null,
-        CancellationToken cancellationToken = default) where T : class
-        => BulkUpsertInternalAsync(context, entities, matchOn, updateColumns, deleteScope: null, config, deleteNotMatchedBySource: false, cancellationToken);
-
-    /// <summary>
-    /// Performs a high-performance bulk upsert (insert or update) of entities using SqlBulkCopy with MERGE statement.
-    /// Inserts new records and updates existing records based on custom match columns or primary key matching.
-    /// Additionally deletes records in the target table that don't exist in the source batch.
-    /// <para>
-    /// <strong>Note:</strong> If entities list is empty, the operation returns early without performing any deletions.
-    /// Deletion requires at least one entity in the source batch to establish match criteria.
-    /// </para>
-    /// </summary>
-    /// <typeparam name="T">The entity type</typeparam>
-    /// <param name="context">The DbContext instance</param>
-    /// <param name="entities">The entities to upsert</param>
-    /// <param name="matchOn">Expression specifying which columns to match on. Use single property (x => x.Email) or anonymous type (x => new { x.Email, x.Username }). If null (default), primary keys will be used.</param>
-    /// <param name="updateColumns">Expression specifying which columns to update on match. Use single property (x => x.Status) or anonymous type (x => new { x.Name, x.UpdatedAt }). If null (default), all non-key columns will be updated.</param>
-    /// <param name="deleteScope">
-    /// Optional expression to scope which records can be deleted.
-	/// Example: x => x.DocumentId == 123
-    /// <para>
-    /// <strong>⚠️ CRITICAL:</strong> When deleteScope is null, ALL records in the target table
-    /// that don't match ANY row in the source batch will be deleted. Use with extreme caution!
-    /// </para>
-    /// <para>
-    /// <strong>Recommended usage:</strong> Always provide deleteScope to limit deletions to a specific subset of data
-    /// (e.g., specific account, date range, or category).
-    /// </para>
-    /// </param>
-    /// <param name="config">Configuration options for the bulk upsert operation. If null, default options will be used.</param>
-    /// <param name="cancellationToken">The cancellation token</param>
-    /// <exception cref="ArgumentNullException">Thrown when context or entities is null</exception>
-    /// <exception cref="InvalidOperationException">Thrown when entity has no primary key (and matchOn is null), entity type is not part of the model, or database provider is not SQL Server</exception>
-    public static Task BulkUpsertWithDeleteScopeAsync<T>(
-        this DbContext context,
-        IList<T> entities,
-        System.Linq.Expressions.Expression<Func<T, object>>? matchOn = null,
-        System.Linq.Expressions.Expression<Func<T, object>>? updateColumns = null,
-        System.Linq.Expressions.Expression<Func<T, bool>>? deleteScope = null,
-        BulkConfig? config = null,
-        CancellationToken cancellationToken = default) where T : class
-        => BulkUpsertInternalAsync(context, entities, matchOn, updateColumns, deleteScope, config, deleteNotMatchedBySource: true, cancellationToken);
-
-    /// <summary>
     /// Internal method that performs bulk upsert with optional delete when not matched by source.
     /// </summary>
-    private static async Task BulkUpsertInternalAsync<T>(
+    public async Task BulkUpsertAsync<T>(
         DbContext context,
         IList<T> entities,
-        System.Linq.Expressions.Expression<Func<T, object>>? matchOn,
-        System.Linq.Expressions.Expression<Func<T, object>>? updateColumns,
-        System.Linq.Expressions.Expression<Func<T, bool>>? deleteScope,
-        BulkConfig? config,
+        Expression<Func<T, object>>? matchOn,
+        Expression<Func<T, object>>? updateColumns,
+        Expression<Func<T, bool>>? deleteScope,
+        BulkConfig config,
         bool deleteNotMatchedBySource,
         CancellationToken cancellationToken) where T : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(entities);
-
-        config ??= new BulkConfig();
+        ArgumentNullException.ThrowIfNull(config);
 
         // Early return for empty collections
         if (entities.Count == 0)
@@ -351,7 +251,7 @@ public static partial class DbContextBulkExtensionUpsert
 
                 // Step 4: Build deleteScope WHERE clause if provided
                 string? deleteScopeSql = null;
-                List<SqlParameter>? deleteScopeParameters = null;
+                List<DbParameter>? deleteScopeParameters = null;
                 if (deleteNotMatchedBySource && deleteScope != null)
                 {
                     (deleteScopeSql, deleteScopeParameters) = ExpressionHelper.BuildWhereClauseFromExpression(deleteScope, context);
@@ -374,7 +274,10 @@ public static partial class DbContextBulkExtensionUpsert
                 // Add deleteScope parameters if any
                 if (deleteScopeParameters?.Count > 0)
                 {
-                    mergeCmd.Parameters.AddRange([.. deleteScopeParameters]);
+                    foreach (var p in deleteScopeParameters)
+                    {
+                        mergeCmd.Parameters.Add(p);
+                    }
                 }
 
                 // If identity sync is enabled, read OUTPUT results and sync back to entities
@@ -625,28 +528,28 @@ public static partial class DbContextBulkExtensionUpsert
     /// Extracts property names from a MatchOn expression.
     /// Supports single property (x => x.Email) or anonymous type (x => new { x.Email, x.Username }).
     /// </summary>
-    private static List<string> ExtractPropertyNamesFromExpression<T>(System.Linq.Expressions.Expression<Func<T, object>> expression)
+    private static List<string> ExtractPropertyNamesFromExpression<T>(Expression<Func<T, object>> expression)
     {
         var propertyNames = new List<string>();
 
-        if (expression.Body is System.Linq.Expressions.NewExpression newExpression)
+        if (expression.Body is NewExpression newExpression)
         {
             // Anonymous type: x => new { x.Email, x.Username }
             foreach (var arg in newExpression.Arguments)
             {
-                if (arg is System.Linq.Expressions.MemberExpression memberExpr)
+                if (arg is MemberExpression memberExpr)
                 {
                     propertyNames.Add(memberExpr.Member.Name);
                 }
             }
         }
-        else if (expression.Body is System.Linq.Expressions.MemberExpression memberExpression)
+        else if (expression.Body is MemberExpression memberExpression)
         {
             // Single property: x => x.Email
             propertyNames.Add(memberExpression.Member.Name);
         }
-        else if (expression.Body is System.Linq.Expressions.UnaryExpression unaryExpression &&
-                 unaryExpression.Operand is System.Linq.Expressions.MemberExpression unaryMember)
+        else if (expression.Body is UnaryExpression unaryExpression &&
+                 unaryExpression.Operand is MemberExpression unaryMember)
         {
             // Boxing conversion: x => (object)x.Id
             propertyNames.Add(unaryMember.Member.Name);

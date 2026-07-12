@@ -1,6 +1,6 @@
+using System.Data.Common;
 using System.Linq.Expressions;
 using ContextBulkExtension.Extensions;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace ContextBulkExtension.Helpers;
@@ -53,9 +53,9 @@ public static class ExpressionHelper
     /// Converts a boolean lambda expression to SQL WHERE clause with parameterized values.
     /// Supports: ==, !=, &lt;, &gt;, &lt;=, &gt;=, &amp;&amp; (AND), || (OR)
     /// Example: x =&gt; x.AccountId == 123 &amp;&amp; x.Metric == "TOU"
-    /// Returns: ("(target.[AccountId] = @p0 AND target.[Metric] = @p1)", [SqlParameter("@p0", 123), SqlParameter("@p1", "TOU")])
+    /// Returns: ("(target.[AccountId] = @p0 AND target.[Metric] = @p1)", parameters)
     /// </summary>
-    public static (string Sql, List<SqlParameter> Parameters) BuildWhereClauseFromExpression<T>(
+    public static (string Sql, List<DbParameter> Parameters) BuildWhereClauseFromExpression<T>(
         Expression<Func<T, bool>> expression,
         DbContext context) where T : class
     {
@@ -63,8 +63,9 @@ public static class ExpressionHelper
         var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
         var columnMap = columns.ToDictionary(c => c.PropertyInfo.Name, c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
-        var parameters = new List<SqlParameter>();
-        var sql = BuildWhereClauseRecursive(expression.Body, columnMap, parameters);
+        var connection = context.Database.GetDbConnection();
+        var parameters = new List<DbParameter>();
+        var sql = BuildWhereClauseRecursive(expression.Body, columnMap, parameters, connection);
         return (sql, parameters);
     }
 
@@ -74,13 +75,14 @@ public static class ExpressionHelper
     private static string BuildWhereClauseRecursive(
         Expression expression,
         Dictionary<string, string> columnMap,
-        List<SqlParameter> parameters)
+        List<DbParameter> parameters,
+        DbConnection connection)
     {
         switch (expression)
         {
             case BinaryExpression binaryExpr:
-                var left = BuildWhereClauseRecursive(binaryExpr.Left, columnMap, parameters);
-                var right = BuildWhereClauseRecursive(binaryExpr.Right, columnMap, parameters);
+                var left = BuildWhereClauseRecursive(binaryExpr.Left, columnMap, parameters, connection);
+                var right = BuildWhereClauseRecursive(binaryExpr.Right, columnMap, parameters, connection);
 
                 var op = binaryExpr.NodeType switch
                 {
@@ -133,7 +135,7 @@ public static class ExpressionHelper
                     {
                         var lambda = Expression.Lambda(memberExpr);
                         var value = lambda.Compile().DynamicInvoke();
-                        return AddParameter(value, parameters);
+                        return AddParameter(value, parameters, connection);
                     }
                     catch (Exception ex)
                     {
@@ -143,11 +145,11 @@ public static class ExpressionHelper
 
             case ConstantExpression constantExpr:
                 // Constant value: Add as parameter instead of inlining
-                return AddParameter(constantExpr.Value, parameters);
+                return AddParameter(constantExpr.Value, parameters, connection);
 
             case UnaryExpression unaryExpr when unaryExpr.NodeType == ExpressionType.Convert:
                 // Type conversion: (int)x.Id
-                return BuildWhereClauseRecursive(unaryExpr.Operand, columnMap, parameters);
+                return BuildWhereClauseRecursive(unaryExpr.Operand, columnMap, parameters, connection);
 
             default:
                 // For complex expressions (method calls, closures), evaluate to get the value
@@ -158,7 +160,7 @@ public static class ExpressionHelper
                     {
                         var lambda = Expression.Lambda(expression);
                         var value = lambda.Compile().DynamicInvoke();
-                        return AddParameter(value, parameters);
+                        return AddParameter(value, parameters, connection);
                     }
                     catch (Exception ex)
                     {
@@ -174,7 +176,7 @@ public static class ExpressionHelper
     /// Adds a value as a SQL parameter and returns the parameter placeholder.
     /// Prevents SQL injection by using parameterized queries.
     /// </summary>
-    private static string AddParameter(object? value, List<SqlParameter> parameters)
+    private static string AddParameter(object? value, List<DbParameter> parameters, DbConnection connection)
     {
         if (value == null)
         {
@@ -182,7 +184,11 @@ public static class ExpressionHelper
         }
 
         var paramName = $"@p{parameters.Count}";
-        var parameter = new SqlParameter(paramName, value);
+        // ponytail: DbConnection has no CreateParameter; create via temporary command
+        using var cmd = connection.CreateCommand();
+        var parameter = cmd.CreateParameter();
+        parameter.ParameterName = paramName;
+        parameter.Value = value;
         parameters.Add(parameter);
         return paramName;
     }

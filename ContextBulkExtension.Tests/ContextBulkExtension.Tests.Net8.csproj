@@ -19,11 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ContextBulkExtension\ContextBulkExtension.Net8.csproj" />
+    <Using Include="Xunit" />
   </ItemGroup>
 
   <ItemGroup>
-    <Using Include="Xunit" />
+    <ProjectReference Include="..\ContextBulkExtension.SqlServer\ContextBulkExtension.SqlServer.Net8.csproj" />
   </ItemGroup>
 
 </Project>
