@@ -1,4 +1,4 @@
-namespace ContextBulkExtension.Helpers;
+namespace ContextBulkExtension.Core.Helpers;
 
 /// <summary>
 /// Constants used throughout bulk operations.

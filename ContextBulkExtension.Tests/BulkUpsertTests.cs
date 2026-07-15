@@ -1,3 +1,4 @@
+using ContextBulkExtension.Core;
 using ContextBulkExtension.Tests.Fixtures;
 using ContextBulkExtension.Tests.TestEntities;
 using Microsoft.EntityFrameworkCore;

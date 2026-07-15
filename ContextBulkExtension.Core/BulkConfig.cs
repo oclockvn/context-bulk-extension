@@ -1,4 +1,4 @@
-namespace ContextBulkExtension;
+namespace ContextBulkExtension.Core;
 
 /// <summary>
 /// Configuration options for bulk operations.
@@ -17,22 +17,26 @@ public record BulkConfig
 
     /// <summary>
     /// Check constraints during bulk insert. Default is true.
+    /// SQL Server only (SqlBulkCopyOptions); ignored by PostgreSQL provider.
     /// </summary>
     public bool CheckConstraints { get; set; } = true;
 
     /// <summary>
     /// Fire insert triggers. Default is false for performance.
+    /// SQL Server only (SqlBulkCopyOptions); ignored by PostgreSQL provider.
     /// </summary>
     public bool FireTriggers { get; set; } = false;
 
     /// <summary>
     /// Enable streaming for very large datasets. Default is true.
+    /// SQL Server only (SqlBulkCopy); ignored by PostgreSQL provider.
     /// </summary>
     public bool EnableStreaming { get; set; } = true;
 
     /// <summary>
     /// Use table lock for better performance. Default is true.
     /// Note: Set to false for memory-optimized tables (In-Memory OLTP).
+    /// SQL Server only (SqlBulkCopyOptions); ignored by PostgreSQL provider.
     /// </summary>
     public bool UseTableLock { get; set; } = true;
 

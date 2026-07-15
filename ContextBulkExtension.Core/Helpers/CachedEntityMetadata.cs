@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using System.Collections.Generic;
 
-namespace ContextBulkExtension.Helpers;
+namespace ContextBulkExtension.Core.Helpers;
 
 /// <summary>
 /// Cached metadata for an entity type to improve performance.

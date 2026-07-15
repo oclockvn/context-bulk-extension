@@ -1,5 +1,4 @@
-using System.Runtime.CompilerServices;
-using ContextBulkExtension.Abstractions;
+using ContextBulkExtension.Core.Abstractions;
 
 namespace ContextBulkExtension.SqlServer;
 

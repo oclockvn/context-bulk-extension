@@ -1,9 +1,9 @@
 using System.Data.Common;
 using System.Linq.Expressions;
-using ContextBulkExtension.Extensions;
+using ContextBulkExtension.Core.Extensions;
 using Microsoft.EntityFrameworkCore;
 
-namespace ContextBulkExtension.Helpers;
+namespace ContextBulkExtension.Core.Helpers;
 
 /// <summary>
 /// Helper class for working with LINQ expressions in bulk operations.

@@ -1,8 +1,9 @@
 using System.Data.Common;
 using System.Linq.Expressions;
+using ContextBulkExtension.Core;
 using Microsoft.EntityFrameworkCore;
 
-namespace ContextBulkExtension.Abstractions;
+namespace ContextBulkExtension.Core.Abstractions;
 
 internal interface IBulkProvider
 {

@@ -68,6 +68,22 @@ public class PostgresDatabaseFixture : IAsyncLifetime
         await context.SaveChangesAsync();
     }
 
+    public async Task ExecuteInTransactionAsync(Func<PostgresTestDbContext, Task> action)
+    {
+        await using var context = CreateNewContext();
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        try
+        {
+            await action(context);
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
     public async Task<int> GetCountAsync<T>() where T : class
     {
         await using var context = CreateNewContext();

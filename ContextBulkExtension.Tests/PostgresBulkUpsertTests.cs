@@ -1,3 +1,4 @@
+using ContextBulkExtension.Core;
 using ContextBulkExtension.Tests.Fixtures;
 using ContextBulkExtension.Tests.TestEntities;
 
@@ -111,5 +112,25 @@ public class PostgresBulkUpsertTests(PostgresDatabaseFixture fixture) : IAsyncLi
         Assert.Equal(2, all.Count);
         Assert.Contains(all, e => e.Email == "a@test.com" && e.FirstName == "Updated" && e.Points == 50);
         Assert.Contains(all, e => e.Email == "b@test.com" && e.FirstName == "B");
+    }
+
+    [Fact]
+    public async Task BulkUpsertAsync_WithinTransactionThatRollsBack_ShouldNotPersist()
+    {
+        var entities = Enumerable.Range(1, 10)
+            .Select(i => new SimpleEntity
+            {
+                Name = $"Rollback {i}",
+                Value = i,
+                CreatedAt = DateTime.UtcNow
+            })
+            .ToList();
+
+        await using var context = _fixture.CreateNewContext();
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        await context.BulkUpsertAsync(entities);
+        await transaction.RollbackAsync();
+
+        Assert.Equal(0, await _fixture.GetCountAsync<SimpleEntity>());
     }
 }

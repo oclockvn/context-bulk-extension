@@ -34,6 +34,8 @@
         <AssemblyVersion>8.$(BaseVersion).$(PatchNumber)</AssemblyVersion>
         <FileVersion>8.$(BaseVersion).$(PatchNumber)</FileVersion>
         <PackageOutputPath>$(SolutionDir)Nugets\net8</PackageOutputPath>
+        <!-- Same assembly name as net10 twin so BulkProviderRegistry LoadFrom finds ContextBulkExtension.*.dll -->
+        <AssemblyName>$([System.String]::Copy('$(MSBuildProjectName)').Replace('.Net8',''))</AssemblyName>
     </PropertyGroup>
 
     <!-- .NET 10 specific configuration (default) -->

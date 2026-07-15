@@ -1,8 +1,8 @@
 using System.Linq.Expressions;
-using ContextBulkExtension.Abstractions;
+using ContextBulkExtension.Core.Abstractions;
 using Microsoft.EntityFrameworkCore;
 
-namespace ContextBulkExtension;
+namespace ContextBulkExtension.Core;
 
 /// <summary>
 /// Extension methods for DbContext to perform high-performance bulk operations.

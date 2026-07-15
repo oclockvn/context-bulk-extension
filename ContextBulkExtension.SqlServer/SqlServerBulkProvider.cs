@@ -1,6 +1,7 @@
-using ContextBulkExtension.Abstractions;
-using ContextBulkExtension.Extensions;
-using ContextBulkExtension.Helpers;
+using ContextBulkExtension.Core;
+using ContextBulkExtension.Core.Abstractions;
+using ContextBulkExtension.Core.Extensions;
+using ContextBulkExtension.Core.Helpers;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -65,7 +66,9 @@ internal sealed class SqlServerBulkProvider : IBulkProvider
 
             if (currentTransaction != null)
             {
-                sqlTransaction = currentTransaction.GetDbTransaction() as SqlTransaction;
+                sqlTransaction = currentTransaction.GetDbTransaction() as SqlTransaction
+                    ?? throw new InvalidOperationException(
+                        "Current EF transaction is not a SqlTransaction. Bulk operations require the provider transaction type.");
             }
 
             // Configure SqlBulkCopy
@@ -194,7 +197,9 @@ internal sealed class SqlServerBulkProvider : IBulkProvider
 
             if (currentTransaction != null)
             {
-                sqlTransaction = currentTransaction.GetDbTransaction() as SqlTransaction;
+                sqlTransaction = currentTransaction.GetDbTransaction() as SqlTransaction
+                    ?? throw new InvalidOperationException(
+                        "Current EF transaction is not a SqlTransaction. Bulk operations require the provider transaction type.");
             }
 
             // Check if we need to sync identity values

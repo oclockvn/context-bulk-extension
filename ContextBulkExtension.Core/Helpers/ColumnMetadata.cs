@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
-namespace ContextBulkExtension.Helpers;
+namespace ContextBulkExtension.Core.Helpers;
 
 /// <summary>
 /// Metadata for a column mapping.

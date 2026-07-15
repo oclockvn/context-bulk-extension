@@ -1,8 +1,9 @@
 using System.Data.Common;
 using System.Linq.Expressions;
 using System.Text;
-using ContextBulkExtension.Abstractions;
-using ContextBulkExtension.Helpers;
+using ContextBulkExtension.Core;
+using ContextBulkExtension.Core.Abstractions;
+using ContextBulkExtension.Core.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
@@ -40,7 +41,7 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
 
         try
         {
-            _ = context.Database.CurrentTransaction?.GetDbTransaction();
+            // COPY enlists in connection's current EF/Npgsql transaction when present
             await CopyIntoAsync(connection, tableName, columns, entities, includeRowIndex: false, cancellationToken);
         }
         catch (PostgresException ex)
@@ -111,16 +112,16 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
 
         await context.Database.OpenConnectionAsync(cancellationToken);
 
+        // Own txn when none: UPDATE+INSERT (+ optional delete) must be atomic
+        IDbContextTransaction? ownedTransaction = null;
+        if (context.Database.CurrentTransaction == null)
+            ownedTransaction = await context.Database.BeginTransactionAsync(cancellationToken);
+
         try
         {
-            _ = context.Database.CurrentTransaction?.GetDbTransaction();
-
             var createSql = BuildCreateTempTableSql(stagingTable, columns, needsIdentitySync);
-            await using (var createCmd = new NpgsqlCommand(createSql, connection))
+            await using (var createCmd = CreateCommand(connection, context, createSql, config.TimeoutSeconds))
             {
-                createCmd.CommandTimeout = config.TimeoutSeconds;
-                if (context.Database.CurrentTransaction != null)
-                    createCmd.Transaction = (NpgsqlTransaction)context.Database.CurrentTransaction.GetDbTransaction();
                 await createCmd.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -132,7 +133,8 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
                 if (updateColumns != null)
                     updateColumnNames = ExpressionHelper.ExtractPropertyNamesFromExpression(updateColumns);
 
-                var upsertSql = BuildUpsertSql(tableName, stagingTable, columns, matchColumns, updateColumnNames, config);
+                var upsertSql = BuildUpsertSql(
+                    tableName, stagingTable, columns, matchColumns, updateColumnNames, config, identityColumns);
                 await using (var upsertCmd = CreateCommand(connection, context, upsertSql, config.TimeoutSeconds))
                 {
                     await upsertCmd.ExecuteNonQueryAsync(cancellationToken);
@@ -178,6 +180,9 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
                         }
                     }
                 }
+
+                if (ownedTransaction != null)
+                    await ownedTransaction.CommitAsync(cancellationToken);
             }
             finally
             {
@@ -194,10 +199,20 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
         }
         catch (PostgresException ex)
         {
+            if (ownedTransaction != null)
+                await ownedTransaction.RollbackAsync(cancellationToken);
             throw new InvalidOperationException($"Bulk upsert failed for entity type '{typeof(T).Name}'. Error: {ex.Message}", ex);
+        }
+        catch
+        {
+            if (ownedTransaction != null)
+                await ownedTransaction.RollbackAsync(cancellationToken);
+            throw;
         }
         finally
         {
+            if (ownedTransaction != null)
+                await ownedTransaction.DisposeAsync();
             await context.Database.CloseConnectionAsync();
         }
     }
@@ -209,7 +224,11 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
             CommandTimeout = timeoutSeconds
         };
         if (context.Database.CurrentTransaction != null)
-            cmd.Transaction = (NpgsqlTransaction)context.Database.CurrentTransaction.GetDbTransaction();
+        {
+            cmd.Transaction = context.Database.CurrentTransaction.GetDbTransaction() as NpgsqlTransaction
+                ?? throw new InvalidOperationException(
+                    "Current EF transaction is not an NpgsqlTransaction. Bulk operations require the provider transaction type.");
+        }
         return cmd;
     }
 
@@ -275,9 +294,11 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
         IReadOnlyList<ColumnMetadata> columns,
         IReadOnlyList<ColumnMetadata> matchKeyColumns,
         List<string>? updateColumnNames,
-        BulkConfig options)
+        BulkConfig options,
+        IReadOnlyList<ColumnMetadata>? identityColumns)
     {
-        // ponytail: UPDATE+INSERT avoids ON CONFLICT + identity OVERRIDING edge cases (Id=0 new rows)
+        // ponytail: UPDATE+INSERT avoids ON CONFLICT + identity OVERRIDING when Id=0 on new rows.
+        // Ceiling: not one-statement atomic vs concurrent writers (unique race); owned txn covers multi-statement only.
         var sql = new StringBuilder(300 + columns.Count * 100);
         var matchKeyColumnNames = new HashSet<string>(
             matchKeyColumns.Select(pk => pk.ColumnName),
@@ -319,24 +340,85 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
         }
 
         var insertColumns = columns.Where(c => !c.IsIdentity).ToList();
-        sql.Append($"INSERT INTO {targetTableName} (");
-        sql.Append(string.Join(", ", insertColumns.Select(c => QuoteIdentifier(c.ColumnName))));
-        sql.AppendLine(")");
-        sql.Append("SELECT ");
-        sql.Append(string.Join(", ", insertColumns.Select(c => $"source.{QuoteIdentifier(c.ColumnName)}")));
-        sql.AppendLine($" FROM {sourceTableName} AS source");
-        sql.AppendLine("WHERE NOT EXISTS (");
-        sql.AppendLine($"    SELECT 1 FROM {targetTableName} AS target");
-        sql.Append("    WHERE ");
-        for (int i = 0; i < matchKeyColumns.Count; i++)
+        var writeIdentityToStaging = options.IdentityOutput && identityColumns?.Count > 0;
+        var rowIndex = QuoteIdentifier(BulkOperationConstants.RowIndexColumnName);
+
+        if (writeIdentityToStaging)
         {
-            if (i > 0) sql.Append(" AND ");
-            var col = QuoteIdentifier(matchKeyColumns[i].ColumnName);
-            sql.Append($"target.{col} = source.{col}");
+            // INSERT…RETURNING → pair by __RowIndex order → UPDATE staging identity cols (map C)
+            sql.AppendLine("WITH to_insert AS (");
+            sql.Append($"    SELECT source.{rowIndex}");
+            foreach (var col in insertColumns)
+                sql.Append($", source.{QuoteIdentifier(col.ColumnName)}");
+            sql.AppendLine();
+            sql.AppendLine($"    FROM {sourceTableName} AS source");
+            sql.AppendLine("    WHERE NOT EXISTS (");
+            sql.AppendLine($"        SELECT 1 FROM {targetTableName} AS target");
+            sql.Append("        WHERE ");
+            for (int i = 0; i < matchKeyColumns.Count; i++)
+            {
+                if (i > 0) sql.Append(" AND ");
+                var col = QuoteIdentifier(matchKeyColumns[i].ColumnName);
+                sql.Append($"target.{col} = source.{col}");
+            }
+
+            sql.AppendLine();
+            sql.AppendLine("    )");
+            sql.AppendLine("),");
+            sql.AppendLine("ins AS (");
+            sql.Append($"    INSERT INTO {targetTableName} (");
+            sql.Append(string.Join(", ", insertColumns.Select(c => QuoteIdentifier(c.ColumnName))));
+            sql.AppendLine(")");
+            sql.Append("    SELECT ");
+            sql.Append(string.Join(", ", insertColumns.Select(c => QuoteIdentifier(c.ColumnName))));
+            sql.AppendLine($" FROM to_insert ORDER BY {rowIndex}");
+            sql.Append("    RETURNING ");
+            sql.AppendLine(string.Join(", ", identityColumns!.Select(c => QuoteIdentifier(c.ColumnName))));
+            sql.AppendLine("),");
+            sql.AppendLine("ins_ordered AS (");
+            sql.Append("    SELECT ");
+            sql.Append(string.Join(", ", identityColumns.Select(c => QuoteIdentifier(c.ColumnName))));
+            sql.Append(", ROW_NUMBER() OVER (ORDER BY ");
+            sql.Append(QuoteIdentifier(identityColumns[0].ColumnName));
+            sql.AppendLine(") AS rn FROM ins");
+            sql.AppendLine("),");
+            sql.AppendLine("src_ordered AS (");
+            sql.AppendLine($"    SELECT {rowIndex}, ROW_NUMBER() OVER (ORDER BY {rowIndex}) AS rn FROM to_insert");
+            sql.AppendLine(")");
+            sql.AppendLine($"UPDATE {sourceTableName} AS source SET");
+            for (int i = 0; i < identityColumns.Count; i++)
+            {
+                var col = QuoteIdentifier(identityColumns[i].ColumnName);
+                sql.Append($"    {col} = ins_ordered.{col}");
+                sql.AppendLine(i < identityColumns.Count - 1 ? "," : string.Empty);
+            }
+
+            sql.AppendLine("FROM src_ordered");
+            sql.AppendLine("INNER JOIN ins_ordered ON src_ordered.rn = ins_ordered.rn");
+            sql.AppendLine($"WHERE source.{rowIndex} = src_ordered.{rowIndex};");
+        }
+        else
+        {
+            sql.Append($"INSERT INTO {targetTableName} (");
+            sql.Append(string.Join(", ", insertColumns.Select(c => QuoteIdentifier(c.ColumnName))));
+            sql.AppendLine(")");
+            sql.Append("SELECT ");
+            sql.Append(string.Join(", ", insertColumns.Select(c => $"source.{QuoteIdentifier(c.ColumnName)}")));
+            sql.AppendLine($" FROM {sourceTableName} AS source");
+            sql.AppendLine("WHERE NOT EXISTS (");
+            sql.AppendLine($"    SELECT 1 FROM {targetTableName} AS target");
+            sql.Append("    WHERE ");
+            for (int i = 0; i < matchKeyColumns.Count; i++)
+            {
+                if (i > 0) sql.Append(" AND ");
+                var col = QuoteIdentifier(matchKeyColumns[i].ColumnName);
+                sql.Append($"target.{col} = source.{col}");
+            }
+
+            sql.AppendLine();
+            sql.AppendLine(");");
         }
 
-        sql.AppendLine();
-        sql.AppendLine(");");
         return sql.ToString();
     }
 
@@ -482,8 +564,8 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
                 await writer.WriteAsync(bytes, cancellationToken);
                 break;
             default:
-                await writer.WriteAsync(Convert.ToString(value) ?? string.Empty, cancellationToken);
-                break;
+                throw new NotSupportedException(
+                    $"PostgreSQL binary COPY does not support CLR type '{value.GetType().FullName}'. Convert to a supported provider type.");
         }
     }
 }

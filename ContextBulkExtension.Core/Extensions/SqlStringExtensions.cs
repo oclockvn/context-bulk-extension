@@ -1,4 +1,4 @@
-namespace ContextBulkExtension.Extensions;
+namespace ContextBulkExtension.Core.Extensions;
 
 public static class SqlStringExtensions
 {

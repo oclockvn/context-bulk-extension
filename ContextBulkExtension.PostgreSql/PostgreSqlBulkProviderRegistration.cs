@@ -1,4 +1,4 @@
-using ContextBulkExtension.Abstractions;
+using ContextBulkExtension.Core.Abstractions;
 
 namespace ContextBulkExtension.PostgreSql;
 

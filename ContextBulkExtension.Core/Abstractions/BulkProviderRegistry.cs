@@ -1,7 +1,7 @@
 using System.Data.Common;
 using System.Reflection;
 
-namespace ContextBulkExtension.Abstractions;
+namespace ContextBulkExtension.Core.Abstractions;
 
 internal static class BulkProviderRegistry
 {
@@ -37,7 +37,9 @@ internal static class BulkProviderRegistry
 
         throw new InvalidOperationException(
             $"No bulk provider registered for connection type '{connection.GetType().FullName}'. " +
-            "Reference ContextBulkExtension.SqlServer or ContextBulkExtension.PostgreSql.");
+            "Reference ContextBulkExtension.SqlServer or ContextBulkExtension.PostgreSql. " +
+            "Auto-discovery loads provider DLLs from AppContext.BaseDirectory; " +
+            "trimmed/AOT/single-file apps must keep the provider assembly deployed beside the app.");
     }
 
     // ponytail: library ModuleInitializer unreliable; load provider dll + invoke Register entrypoint
@@ -84,9 +86,14 @@ internal static class BulkProviderRegistry
             var method = type?.GetMethod(methodName, BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
             method?.Invoke(null, null);
         }
-        catch
+        catch (Exception ex) when (
+            ex is FileNotFoundException
+            or FileLoadException
+            or BadImageFormatException
+            or DirectoryNotFoundException
+            or IOException)
         {
-            // Provider package not referenced — ignore
+            // Provider package not present beside app — ignore
         }
     }
 }

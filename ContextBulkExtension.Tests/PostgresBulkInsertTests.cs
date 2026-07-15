@@ -1,5 +1,7 @@
+using ContextBulkExtension.Core;
 using ContextBulkExtension.Tests.Fixtures;
 using ContextBulkExtension.Tests.TestEntities;
+using Microsoft.EntityFrameworkCore;
 
 namespace ContextBulkExtension.Tests;
 
@@ -42,5 +44,47 @@ public class PostgresBulkInsertTests(PostgresDatabaseFixture fixture) : IAsyncLi
 
         var last = insertedEntities.First(e => e.Value == 50);
         Assert.Equal("Entity 50", last.Name);
+    }
+
+    [Fact]
+    public async Task BulkInsertAsync_WithinTransaction_ShouldCommitSuccessfully()
+    {
+        var entities = Enumerable.Range(1, 50)
+            .Select(i => new SimpleEntity
+            {
+                Name = $"Transaction Entity {i}",
+                Value = i,
+                CreatedAt = DateTime.UtcNow
+            })
+            .ToList();
+
+        await _fixture.ExecuteInTransactionAsync(async context =>
+        {
+            await context.BulkInsertAsync(entities);
+        });
+
+        var count = await _fixture.GetCountAsync<SimpleEntity>();
+        Assert.Equal(50, count);
+    }
+
+    [Fact]
+    public async Task BulkInsertAsync_WithinTransactionThatRollsBack_ShouldNotInsert()
+    {
+        var entities = Enumerable.Range(1, 50)
+            .Select(i => new SimpleEntity
+            {
+                Name = $"Rollback Entity {i}",
+                Value = i,
+                CreatedAt = DateTime.UtcNow
+            })
+            .ToList();
+
+        await using var context = _fixture.CreateNewContext();
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        await context.BulkInsertAsync(entities);
+        await transaction.RollbackAsync();
+
+        var count = await _fixture.GetCountAsync<SimpleEntity>();
+        Assert.Equal(0, count);
     }
 }
