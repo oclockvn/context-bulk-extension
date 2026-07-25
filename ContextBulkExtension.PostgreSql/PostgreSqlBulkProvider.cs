@@ -1,5 +1,4 @@
 using System.Data.Common;
-using System.Linq.Expressions;
 using System.Text;
 using ContextBulkExtension.Core;
 using ContextBulkExtension.Core.Abstractions;
@@ -10,216 +9,138 @@ using Npgsql;
 
 namespace ContextBulkExtension.PostgreSql;
 
-internal sealed class PostgreSqlBulkProvider : IBulkProvider
+internal sealed class PostgreSqlBulkProvider : BulkProviderBase
 {
-    public bool Supports(DbConnection connection) => connection is NpgsqlConnection;
+    public override bool Supports(DbConnection connection) => connection is NpgsqlConnection;
 
-    public async Task BulkInsertAsync<T>(
-        DbContext context,
-        IList<T> entities,
-        BulkConfig config,
-        CancellationToken cancellationToken) where T : class
+    protected override bool OwnsTransactionWhenMissing => true;
+    protected override bool BundlesDeleteInUpsert => false;
+    protected override bool BundlesIdentityInUpsert => false;
+
+    protected override string NewStagingTableName()
+        => QuoteIdentifier($"temp_staging_{Guid.NewGuid():N}");
+
+    protected override string BuildCreateStagingSql(string stagingTable, IReadOnlyList<ColumnMetadata> columns, bool includeRowIndex)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(entities);
-        ArgumentNullException.ThrowIfNull(config);
+        var sql = new StringBuilder(100 + columns.Count * 50);
+        sql.AppendLine($"CREATE TEMP TABLE {stagingTable} (");
 
-        if (entities.Count == 0)
-            return;
+        if (includeRowIndex)
+            sql.AppendLine($"    {QuoteIdentifier(BulkOperationConstants.RowIndexColumnName)} integer,");
 
-        var dbConnection = context.Database.GetDbConnection();
-        if (dbConnection is not NpgsqlConnection connection)
+        for (int i = 0; i < columns.Count; i++)
         {
-            throw new InvalidOperationException(
-                $"BulkInsertAsync only supports PostgreSQL. Current connection type: {dbConnection?.GetType().Name ?? "Unknown"}");
+            var column = columns[i];
+            sql.Append($"    {QuoteIdentifier(column.ColumnName)} {column.SqlType}");
+            sql.AppendLine(i < columns.Count - 1 ? "," : string.Empty);
         }
 
-        var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: false);
-        var tableName = GetQuotedTableName<T>(context);
-
-        await context.Database.OpenConnectionAsync(cancellationToken);
-
-        try
-        {
-            // COPY enlists in connection's current EF/Npgsql transaction when present
-            await CopyIntoAsync(connection, tableName, columns, entities, includeRowIndex: false, cancellationToken);
-        }
-        catch (PostgresException ex)
-        {
-            throw new InvalidOperationException(
-                $"Bulk insert failed for entity type '{typeof(T).Name}'. Error: {ex.Message}", ex);
-        }
-        finally
-        {
-            await context.Database.CloseConnectionAsync();
-        }
+        sql.AppendLine(");");
+        return sql.ToString();
     }
 
-    public async Task BulkUpsertAsync<T>(
+    protected override string BuildDropStagingSql(string stagingTable)
+        => $"DROP TABLE IF EXISTS {stagingTable};";
+
+    protected override async Task BulkLoadToTargetAsync<T>(
         DbContext context,
+        DbConnection connection,
+        string tableName,
+        IReadOnlyList<ColumnMetadata> columns,
         IList<T> entities,
-        Expression<Func<T, object>>? matchOn,
-        Expression<Func<T, object>>? updateColumns,
-        Expression<Func<T, bool>>? deleteScope,
         BulkConfig config,
+        CancellationToken cancellationToken)
+    {
+        // COPY enlists in connection's current EF/Npgsql transaction when present
+        await CopyIntoAsync((NpgsqlConnection)connection, tableName, columns, entities, includeRowIndex: false, cancellationToken);
+    }
+
+    protected override async Task BulkLoadToStagingAsync<T>(
+        DbContext context,
+        DbConnection connection,
+        string stagingTable,
+        IReadOnlyList<ColumnMetadata> columns,
+        IList<T> entities,
+        bool includeRowIndex,
+        BulkConfig config,
+        CancellationToken cancellationToken)
+    {
+        await CopyIntoAsync((NpgsqlConnection)connection, stagingTable, columns, entities, includeRowIndex, cancellationToken);
+    }
+
+    protected override async Task ExecuteUpsertAsync<T>(
+        DbContext context,
+        DbConnection connection,
+        string targetTable,
+        string stagingTable,
+        IReadOnlyList<ColumnMetadata> columns,
+        IReadOnlyList<ColumnMetadata> matchColumns,
+        List<string>? updateColumnNames,
+        BulkConfig config,
+        IReadOnlyList<ColumnMetadata>? identityColumns,
+        bool needsIdentitySync,
         bool deleteNotMatchedBySource,
-        CancellationToken cancellationToken) where T : class
+        string? deleteScopeSql,
+        List<DbParameter>? deleteScopeParameters,
+        IList<T> entities,
+        CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(entities);
-        ArgumentNullException.ThrowIfNull(config);
-
-        if (entities.Count == 0)
-            return;
-
-        var dbConnection = context.Database.GetDbConnection();
-        if (dbConnection is not NpgsqlConnection connection)
-        {
-            throw new InvalidOperationException(
-                $"BulkUpsertAsync only supports PostgreSQL. Current connection type: {dbConnection?.GetType().Name ?? "Unknown"}");
-        }
-
-        IReadOnlyList<ColumnMetadata> matchColumns;
-        if (matchOn != null)
-        {
-            var propertyNames = ExpressionHelper.ExtractPropertyNamesFromExpression(matchOn);
-            var allColumns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
-            var propertyNamesSet = new HashSet<string>(propertyNames, StringComparer.OrdinalIgnoreCase);
-            matchColumns = allColumns.Where(c => propertyNamesSet.Contains(c.PropertyInfo.Name)).ToList();
-
-            if (matchColumns.Count != propertyNames.Count)
-            {
-                var foundNames = new HashSet<string>(matchColumns.Select(c => c.PropertyInfo.Name), StringComparer.OrdinalIgnoreCase);
-                var missing = propertyNames.Where(p => !foundNames.Contains(p));
-                throw new InvalidOperationException($"Properties not found in entity metadata: {string.Join(", ", missing)}.");
-            }
-        }
-        else
-        {
-            matchColumns = EntityMetadataHelper.GetPrimaryKeyColumns<T>(context);
-            if (matchColumns.Count == 0)
-            {
-                throw new InvalidOperationException(
-                    $"Entity type '{typeof(T).Name}' has no primary key defined. Either define a primary key or use matchOn parameter to specify custom match columns.");
-            }
-        }
-
-        var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
-        var tableName = GetQuotedTableName<T>(context);
-        var identityColumns = config.IdentityOutput ? EntityMetadataHelper.GetIdentityColumns<T>(context) : null;
-        var needsIdentitySync = identityColumns?.Count > 0 && config.IdentityOutput;
-        var stagingTable = QuoteIdentifier($"temp_staging_{Guid.NewGuid():N}");
-
-        await context.Database.OpenConnectionAsync(cancellationToken);
-
-        // Own txn when none: UPDATE+INSERT (+ optional delete) must be atomic
-        IDbContextTransaction? ownedTransaction = null;
-        if (context.Database.CurrentTransaction == null)
-            ownedTransaction = await context.Database.BeginTransactionAsync(cancellationToken);
-
-        try
-        {
-            var createSql = BuildCreateTempTableSql(stagingTable, columns, needsIdentitySync);
-            await using (var createCmd = CreateCommand(connection, context, createSql, config.TimeoutSeconds))
-            {
-                await createCmd.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            try
-            {
-                await CopyIntoAsync(connection, stagingTable, columns, entities, needsIdentitySync, cancellationToken);
-
-                List<string>? updateColumnNames = null;
-                if (updateColumns != null)
-                    updateColumnNames = ExpressionHelper.ExtractPropertyNamesFromExpression(updateColumns);
-
-                var upsertSql = BuildUpsertSql(
-                    tableName, stagingTable, columns, matchColumns, updateColumnNames, config, identityColumns);
-                await using (var upsertCmd = CreateCommand(connection, context, upsertSql, config.TimeoutSeconds))
-                {
-                    await upsertCmd.ExecuteNonQueryAsync(cancellationToken);
-                }
-
-                if (deleteNotMatchedBySource)
-                {
-                    string? deleteScopeSql = null;
-                    List<DbParameter>? deleteScopeParameters = null;
-                    if (deleteScope != null)
-                    {
-                        (deleteScopeSql, deleteScopeParameters) = ExpressionHelper.BuildWhereClauseFromExpression(deleteScope, context);
-                        deleteScopeSql = ToPostgresTargetQualified(deleteScopeSql);
-                    }
-
-                    var deleteSql = BuildDeleteNotMatchedSql(tableName, stagingTable, matchColumns, deleteScopeSql);
-                    await using var deleteCmd = CreateCommand(connection, context, deleteSql, config.TimeoutSeconds);
-                    if (deleteScopeParameters?.Count > 0)
-                    {
-                        foreach (var p in deleteScopeParameters)
-                            deleteCmd.Parameters.Add(p);
-                    }
-
-                    await deleteCmd.ExecuteNonQueryAsync(cancellationToken);
-                }
-
-                if (needsIdentitySync)
-                {
-                    var selectSql = BuildIdentitySelectSql(tableName, stagingTable, matchColumns, identityColumns!);
-                    await using var selectCmd = CreateCommand(connection, context, selectSql, config.TimeoutSeconds);
-                    await using var reader = await selectCmd.ExecuteReaderAsync(cancellationToken);
-                    while (await reader.ReadAsync(cancellationToken))
-                    {
-                        var rowIndex = reader.GetInt32(0);
-                        var entity = entities[rowIndex];
-                        for (int i = 0; i < identityColumns!.Count; i++)
-                        {
-                            var identityColumn = identityColumns[i];
-                            var identityValue = reader.GetValue(i + 1);
-                            if (identityValue != null && identityValue != DBNull.Value && identityColumn.ValueConverter != null)
-                                identityValue = identityColumn.ValueConverter.ConvertFromProvider.Invoke(identityValue);
-                            identityColumn.CompiledSetter(entity, identityValue);
-                        }
-                    }
-                }
-
-                if (ownedTransaction != null)
-                    await ownedTransaction.CommitAsync(cancellationToken);
-            }
-            finally
-            {
-                try
-                {
-                    await using var dropCmd = CreateCommand(connection, context, $"DROP TABLE IF EXISTS {stagingTable};", config.TimeoutSeconds);
-                    await dropCmd.ExecuteNonQueryAsync(cancellationToken);
-                }
-                catch
-                {
-                    // temp tables cleaned on session end
-                }
-            }
-        }
-        catch (PostgresException ex)
-        {
-            if (ownedTransaction != null)
-                await ownedTransaction.RollbackAsync(cancellationToken);
-            throw new InvalidOperationException($"Bulk upsert failed for entity type '{typeof(T).Name}'. Error: {ex.Message}", ex);
-        }
-        catch
-        {
-            if (ownedTransaction != null)
-                await ownedTransaction.RollbackAsync(cancellationToken);
-            throw;
-        }
-        finally
-        {
-            if (ownedTransaction != null)
-                await ownedTransaction.DisposeAsync();
-            await context.Database.CloseConnectionAsync();
-        }
+        var upsertSql = BuildUpsertSql(
+            targetTable, stagingTable, columns, matchColumns, updateColumnNames, config, identityColumns);
+        await using var upsertCmd = CreateCommand(connection, context, upsertSql, config.TimeoutSeconds);
+        await upsertCmd.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static NpgsqlCommand CreateCommand(NpgsqlConnection connection, DbContext context, string sql, int timeoutSeconds)
+    protected override async Task ExecuteDeleteNotMatchedAsync(
+        DbContext context,
+        DbConnection connection,
+        string targetTable,
+        string stagingTable,
+        IReadOnlyList<ColumnMetadata> matchColumns,
+        string? deleteScopeSql,
+        List<DbParameter>? deleteScopeParameters,
+        BulkConfig config,
+        CancellationToken cancellationToken)
     {
-        var cmd = new NpgsqlCommand(sql, connection)
+        var deleteSql = BuildDeleteNotMatchedSql(targetTable, stagingTable, matchColumns, deleteScopeSql);
+        await using var deleteCmd = CreateCommand(connection, context, deleteSql, config.TimeoutSeconds);
+        if (deleteScopeParameters?.Count > 0)
+        {
+            foreach (var p in deleteScopeParameters)
+                deleteCmd.Parameters.Add(p);
+        }
+
+        await deleteCmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    protected override async Task SyncIdentitiesAsync<T>(
+        DbContext context,
+        DbConnection connection,
+        string targetTable,
+        string stagingTable,
+        IReadOnlyList<ColumnMetadata> matchColumns,
+        IReadOnlyList<ColumnMetadata> identityColumns,
+        IList<T> entities,
+        BulkConfig config,
+        CancellationToken cancellationToken)
+    {
+        var selectSql = BuildIdentitySelectSql(targetTable, stagingTable, matchColumns, identityColumns);
+        await using var selectCmd = CreateCommand(connection, context, selectSql, config.TimeoutSeconds);
+        await using var reader = await selectCmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            BulkProviderHelpers.ApplyIdentityValues(reader, entities, identityColumns);
+    }
+
+    protected override string AdaptDeleteScopeSql(string sqlServerStyleWhere)
+        => ToPostgresTargetQualified(sqlServerStyleWhere);
+
+    protected override DbCommand CreateCommand(
+        DbConnection connection,
+        DbContext context,
+        string sql,
+        int timeoutSeconds)
+    {
+        var cmd = new NpgsqlCommand(sql, (NpgsqlConnection)connection)
         {
             CommandTimeout = timeoutSeconds
         };
@@ -232,7 +153,16 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
         return cmd;
     }
 
-    private static async Task CopyIntoAsync<T>(
+    protected override bool IsProviderException(Exception ex) => ex is PostgresException;
+
+    protected override Exception WrapProviderException(Exception ex, string operation, Type entityType)
+        => new InvalidOperationException(
+            $"Bulk {operation} failed for entity type '{entityType.Name}'. Error: {ex.Message}", ex);
+
+    protected override string GetQualifiedTableName<T>(DbContext context)
+        => GetQuotedTableName<T>(context);
+
+    private async Task CopyIntoAsync<T>(
         NpgsqlConnection connection,
         string destinationTable,
         IReadOnlyList<ColumnMetadata> columns,
@@ -269,26 +199,7 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
         await writer.CompleteAsync(cancellationToken);
     }
 
-    private static string BuildCreateTempTableSql(string tempTableName, IReadOnlyList<ColumnMetadata> columns, bool includeRowIndex)
-    {
-        var sql = new StringBuilder(100 + columns.Count * 50);
-        sql.AppendLine($"CREATE TEMP TABLE {tempTableName} (");
-
-        if (includeRowIndex)
-            sql.AppendLine($"    {QuoteIdentifier(BulkOperationConstants.RowIndexColumnName)} integer,");
-
-        for (int i = 0; i < columns.Count; i++)
-        {
-            var column = columns[i];
-            sql.Append($"    {QuoteIdentifier(column.ColumnName)} {column.SqlType}");
-            sql.AppendLine(i < columns.Count - 1 ? "," : string.Empty);
-        }
-
-        sql.AppendLine(");");
-        return sql.ToString();
-    }
-
-    private static string BuildUpsertSql(
+    private string BuildUpsertSql(
         string targetTableName,
         string sourceTableName,
         IReadOnlyList<ColumnMetadata> columns,
@@ -300,21 +211,10 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
         // ponytail: UPDATE+INSERT avoids ON CONFLICT + identity OVERRIDING when Id=0 on new rows.
         // Ceiling: not one-statement atomic vs concurrent writers (unique race); owned txn covers multi-statement only.
         var sql = new StringBuilder(300 + columns.Count * 100);
-        var matchKeyColumnNames = new HashSet<string>(
-            matchKeyColumns.Select(pk => pk.ColumnName),
-            StringComparer.OrdinalIgnoreCase);
 
         if (!options.InsertOnly)
         {
-            var updateCols = columns
-                .Where(c => !c.IsIdentity && !matchKeyColumnNames.Contains(c.ColumnName))
-                .ToList();
-
-            if (updateColumnNames?.Count > 0)
-            {
-                var updateNamesSet = new HashSet<string>(updateColumnNames, StringComparer.OrdinalIgnoreCase);
-                updateCols = [.. updateCols.Where(c => updateNamesSet.Contains(c.PropertyInfo.Name))];
-            }
+            var updateCols = BulkProviderHelpers.FilterUpdateColumns(columns, matchKeyColumns, updateColumnNames);
 
             if (updateCols.Count > 0)
             {
@@ -346,6 +246,7 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
         if (writeIdentityToStaging)
         {
             // INSERT…RETURNING → pair by __RowIndex order → UPDATE staging identity cols (map C)
+            var identities = identityColumns!;
             sql.AppendLine("WITH to_insert AS (");
             sql.Append($"    SELECT source.{rowIndex}");
             foreach (var col in insertColumns)
@@ -373,24 +274,24 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
             sql.Append(string.Join(", ", insertColumns.Select(c => QuoteIdentifier(c.ColumnName))));
             sql.AppendLine($" FROM to_insert ORDER BY {rowIndex}");
             sql.Append("    RETURNING ");
-            sql.AppendLine(string.Join(", ", identityColumns!.Select(c => QuoteIdentifier(c.ColumnName))));
+            sql.AppendLine(string.Join(", ", identities.Select(c => QuoteIdentifier(c.ColumnName))));
             sql.AppendLine("),");
             sql.AppendLine("ins_ordered AS (");
             sql.Append("    SELECT ");
-            sql.Append(string.Join(", ", identityColumns.Select(c => QuoteIdentifier(c.ColumnName))));
+            sql.Append(string.Join(", ", identities.Select(c => QuoteIdentifier(c.ColumnName))));
             sql.Append(", ROW_NUMBER() OVER (ORDER BY ");
-            sql.Append(QuoteIdentifier(identityColumns[0].ColumnName));
+            sql.Append(QuoteIdentifier(identities[0].ColumnName));
             sql.AppendLine(") AS rn FROM ins");
             sql.AppendLine("),");
             sql.AppendLine("src_ordered AS (");
             sql.AppendLine($"    SELECT {rowIndex}, ROW_NUMBER() OVER (ORDER BY {rowIndex}) AS rn FROM to_insert");
             sql.AppendLine(")");
             sql.AppendLine($"UPDATE {sourceTableName} AS source SET");
-            for (int i = 0; i < identityColumns.Count; i++)
+            for (int i = 0; i < identities.Count; i++)
             {
-                var col = QuoteIdentifier(identityColumns[i].ColumnName);
+                var col = QuoteIdentifier(identities[i].ColumnName);
                 sql.Append($"    {col} = ins_ordered.{col}");
-                sql.AppendLine(i < identityColumns.Count - 1 ? "," : string.Empty);
+                sql.AppendLine(i < identities.Count - 1 ? "," : string.Empty);
             }
 
             sql.AppendLine("FROM src_ordered");
@@ -422,7 +323,7 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
         return sql.ToString();
     }
 
-    private static string BuildDeleteNotMatchedSql(
+    private string BuildDeleteNotMatchedSql(
         string targetTableName,
         string sourceTableName,
         IReadOnlyList<ColumnMetadata> matchKeyColumns,
@@ -450,7 +351,7 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
         return sql.ToString();
     }
 
-    private static string BuildIdentitySelectSql(
+    private string BuildIdentitySelectSql(
         string targetTableName,
         string sourceTableName,
         IReadOnlyList<ColumnMetadata> matchKeyColumns,
@@ -479,7 +380,7 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
     private static string ToPostgresTargetQualified(string sqlServerStyleWhere)
         => sqlServerStyleWhere.Replace("[", "\"", StringComparison.Ordinal).Replace("]", "\"", StringComparison.Ordinal);
 
-    internal static string QuoteIdentifier(string identifier)
+    protected override string QuoteIdentifier(string identifier)
     {
         if (string.IsNullOrWhiteSpace(identifier))
             throw new ArgumentException("SQL identifier cannot be null or empty.", nameof(identifier));
@@ -487,7 +388,7 @@ internal sealed class PostgreSqlBulkProvider : IBulkProvider
         return $"\"{identifier.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
     }
 
-    private static string GetQuotedTableName<T>(DbContext context) where T : class
+    private string GetQuotedTableName<T>(DbContext context) where T : class
     {
         var entityType = context.Model.FindEntityType(typeof(T))
             ?? throw new InvalidOperationException($"Entity type '{typeof(T).Name}' is not part of the DbContext model.");

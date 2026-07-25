@@ -5,364 +5,38 @@ using ContextBulkExtension.Core.Helpers;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
-using System.Linq.Expressions;
 using System.Text;
 
 namespace ContextBulkExtension.SqlServer;
 
-internal sealed class SqlServerBulkProvider : IBulkProvider
+internal sealed class SqlServerBulkProvider : BulkProviderBase
 {
-    public bool Supports(DbConnection connection) => connection is SqlConnection;
+    public override bool Supports(DbConnection connection) => connection is SqlConnection;
 
-    /// <summary>
-    /// Performs a high-performance bulk insert of entities using SqlBulkCopy with custom options.
-    /// Suitable for inserting millions of records efficiently.
-    /// </summary>
-    /// <typeparam name="T">The entity type</typeparam>
-    /// <param name="context">The DbContext instance</param>
-    /// <param name="entities">The entities to insert</param>
-	/// <param name="config">Configuration options for the bulk insert operation</param>
-    /// <param name="cancellationToken">The cancellation token</param>
-    /// <exception cref="ArgumentNullException">Thrown when context, entities, or options is null</exception>
-    /// <exception cref="InvalidOperationException">Thrown when entity type is not part of the model or database provider is not SQL Server</exception>
-	public async Task BulkInsertAsync<T>(
-        DbContext context,
-        IList<T> entities,
-        BulkConfig config,
-        CancellationToken cancellationToken) where T : class
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(entities);
-        ArgumentNullException.ThrowIfNull(config);
+    protected override bool OwnsTransactionWhenMissing => false;
+    protected override bool BundlesDeleteInUpsert => true;
+    protected override bool BundlesIdentityInUpsert => true;
 
-        // Early return for empty collections
-        if (entities.Count == 0)
-            return;
+    protected override string QuoteIdentifier(string identifier) => identifier.EscapeSqlIdentifier();
 
-        // Get connection and validate SQL Server
-        var dbConnection = context.Database.GetDbConnection();
-        if (dbConnection is not SqlConnection connection)
-        {
-            throw new InvalidOperationException(
-                $"BulkInsertAsync only supports SQL Server. Current connection type: {dbConnection?.GetType().Name ?? "Unknown"}");
-        }
+    protected override string GetQualifiedTableName<T>(DbContext context) where T : class
+        => EntityMetadataHelper.GetTableName<T>(context);
 
-        // Get metadata (always exclude identity columns - let SQL Server auto-generate them)
-        var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: false);
-        var cachedMetadata = EntityMetadataHelper.GetCachedMetadata<T>(context);
-        var tableName = EntityMetadataHelper.GetTableName<T>(context);
-
-        // Ensure connection is open using EF Core's connection management
-        await context.Database.OpenConnectionAsync(cancellationToken);
-
-        try
-        {
-            // Get existing transaction if any
-            var currentTransaction = context.Database.CurrentTransaction;
-            SqlTransaction? sqlTransaction = null;
-
-            if (currentTransaction != null)
-            {
-                sqlTransaction = currentTransaction.GetDbTransaction() as SqlTransaction
-                    ?? throw new InvalidOperationException(
-                        "Current EF transaction is not a SqlTransaction. Bulk operations require the provider transaction type.");
-            }
-
-            // Configure SqlBulkCopy
-            var bulkCopyOptions = SqlBulkCopyOptions.Default;
-
-            if (config.CheckConstraints)
-                bulkCopyOptions |= SqlBulkCopyOptions.CheckConstraints;
-
-            if (config.FireTriggers)
-                bulkCopyOptions |= SqlBulkCopyOptions.FireTriggers;
-
-            if (config.UseTableLock)
-                bulkCopyOptions |= SqlBulkCopyOptions.TableLock;
-
-            using var bulkCopy = new SqlBulkCopy(connection, bulkCopyOptions, sqlTransaction)
-            {
-                DestinationTableName = tableName,
-                BatchSize = config.BatchSize,
-                BulkCopyTimeout = config.TimeoutSeconds,
-                EnableStreaming = config.EnableStreaming
-            };
-
-            Debug.WriteLine($"[BULK] BulkInsertAsync inserting {entities.Count} entities into {tableName} with {columns.Count} columns");
-
-            // Map columns
-            foreach (var column in columns)
-            {
-                bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
-            }
-
-            // Create data reader and perform bulk insert
-            using var reader = new EntityDataReader<T>(entities, columns);
-            await bulkCopy.WriteToServerAsync(reader, cancellationToken);
-        }
-        catch (SqlException ex)
-        {
-            throw new InvalidOperationException(
-                $"Bulk insert failed for entity type '{typeof(T).Name}'. " +
-                $"Error: {ex.Message}", ex);
-        }
-        finally
-        {
-            await context.Database.CloseConnectionAsync();
-        }
-    }
-
-    /// <summary>
-    /// Internal method that performs bulk upsert with optional delete when not matched by source.
-    /// </summary>
-    public async Task BulkUpsertAsync<T>(
-        DbContext context,
-        IList<T> entities,
-        Expression<Func<T, object>>? matchOn,
-        Expression<Func<T, object>>? updateColumns,
-        Expression<Func<T, bool>>? deleteScope,
-        BulkConfig config,
-        bool deleteNotMatchedBySource,
-        CancellationToken cancellationToken) where T : class
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(entities);
-        ArgumentNullException.ThrowIfNull(config);
-
-        // Early return for empty collections
-        if (entities.Count == 0)
-            return;
-
-        // Get connection and validate SQL Server
-        var dbConnection = context.Database.GetDbConnection();
-        if (dbConnection is not SqlConnection connection)
-        {
-            throw new InvalidOperationException(
-                $"BulkUpsertAsync only supports SQL Server. Current connection type: {dbConnection?.GetType().Name ?? "Unknown"}");
-        }
-
-        // Determine which columns to match on
-        IReadOnlyList<ColumnMetadata> matchColumns;
-
-        if (matchOn != null)
-        {
-            // Extract property names from expression
-            var propertyNames = ExtractPropertyNamesFromExpression(matchOn);
-
-            // Get all columns and map property names to column metadata
-            var allColumns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
-
-            // Use HashSet for O(1) lookup instead of O(n) List.Contains
-            var propertyNamesSet = new HashSet<string>(propertyNames, StringComparer.OrdinalIgnoreCase);
-            matchColumns = allColumns.Where(c => propertyNamesSet.Contains(c.PropertyInfo.Name)).ToList();
-
-            // Validate all properties were found
-            if (matchColumns.Count != propertyNames.Count)
-            {
-                var foundNames = new HashSet<string>(matchColumns.Select(c => c.PropertyInfo.Name), StringComparer.OrdinalIgnoreCase);
-                var missing = propertyNames.Where(p => !foundNames.Contains(p));
-                throw new InvalidOperationException($"Properties not found in entity metadata: {string.Join(", ", missing)}.");
-            }
-        }
-        else
-        {
-            // Fall back to primary keys (existing behavior)
-            matchColumns = EntityMetadataHelper.GetPrimaryKeyColumns<T>(context);
-
-            if (matchColumns.Count == 0)
-            {
-                throw new InvalidOperationException($"Entity type '{typeof(T).Name}' has no primary key defined. Either define a primary key or use matchOn parameter to specify custom match columns.");
-            }
-        }
-
-        // For upsert, always include all columns (including identity) in temp table
-        var columns = EntityMetadataHelper.GetColumnMetadata<T>(context, includeIdentity: true);
-        var cachedMetadata = EntityMetadataHelper.GetCachedMetadata<T>(context);
-        var tableName = EntityMetadataHelper.GetTableName<T>(context);
-
-        // Ensure connection is open using EF Core's connection management
-        await context.Database.OpenConnectionAsync(cancellationToken);
-
-        // Generate unique temp table name to support concurrent operations
-        var tempTableName = $"{BulkOperationConstants.TempTablePrefix}{Guid.NewGuid():N}";
-
-        try
-        {
-            // Get existing transaction if any
-            var currentTransaction = context.Database.CurrentTransaction;
-            SqlTransaction? sqlTransaction = null;
-
-            if (currentTransaction != null)
-            {
-                sqlTransaction = currentTransaction.GetDbTransaction() as SqlTransaction
-                    ?? throw new InvalidOperationException(
-                        "Current EF transaction is not a SqlTransaction. Bulk operations require the provider transaction type.");
-            }
-
-            // Check if we need to sync identity values
-            var identityColumns = config.IdentityOutput ? EntityMetadataHelper.GetIdentityColumns<T>(context) : null;
-            var needsIdentitySync = identityColumns?.Count > 0 && config.IdentityOutput;
-
-            // Step 1: Create temp staging table
-            var createTempTableSql = BuildCreateTempTableSql(tempTableName, columns, needsIdentitySync);
-            using (var createCmd = new SqlCommand(createTempTableSql, connection, sqlTransaction))
-            {
-                await createCmd.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            try
-            {
-                // Step 2: Bulk insert to temp table (always with KeepIdentity for temp table)
-                var bulkCopyOptions = SqlBulkCopyOptions.KeepIdentity;
-
-                if (config.UseTableLock)
-                    bulkCopyOptions |= SqlBulkCopyOptions.TableLock;
-
-                if (config.CheckConstraints)
-                    bulkCopyOptions |= SqlBulkCopyOptions.CheckConstraints;
-
-                using var bulkCopy = new SqlBulkCopy(connection, bulkCopyOptions, sqlTransaction)
-                {
-                    DestinationTableName = tempTableName,
-                    BatchSize = config.BatchSize,
-                    BulkCopyTimeout = config.TimeoutSeconds,
-                    EnableStreaming = config.EnableStreaming
-                };
-
-                // Map columns (add row index mapping if needed)
-                if (needsIdentitySync)
-                {
-                    bulkCopy.ColumnMappings.Add(BulkOperationConstants.RowIndexColumnName, BulkOperationConstants.RowIndexColumnName);
-                }
-
-                foreach (var column in columns)
-                {
-                    bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
-                }
-
-                // Bulk insert to temp table
-                using var reader = new EntityDataReader<T>(entities, columns, needsIdentitySync);
-                await bulkCopy.WriteToServerAsync(reader, cancellationToken);
-
-                // Step 3: Extract update column names from expression (if provided)
-                List<string>? updateColumnNames = null;
-                if (updateColumns != null)
-                {
-                    updateColumnNames = ExtractPropertyNamesFromExpression(updateColumns);
-                }
-
-                // Step 4: Build deleteScope WHERE clause if provided
-                string? deleteScopeSql = null;
-                List<DbParameter>? deleteScopeParameters = null;
-                if (deleteNotMatchedBySource && deleteScope != null)
-                {
-                    (deleteScopeSql, deleteScopeParameters) = ExpressionHelper.BuildWhereClauseFromExpression(deleteScope, context);
-                }
-
-                // Step 5: Execute MERGE statement with custom match columns
-                var mergeSql = BuildMergeSql(tableName, tempTableName, columns, matchColumns, updateColumnNames, config, identityColumns, deleteNotMatchedBySource, deleteScopeSql);
-
-                // Debug: Print generated SQL
-#if DEBUG
-                Debug.WriteLine("=== GENERATED MERGE SQL ===");
-                Debug.WriteLine($"[BULK] BulkUpsertAsync merging {entities.Count} entities into {tableName} with {columns.Count} columns, options: {config}");
-                Debug.WriteLine(mergeSql);
-                Debug.WriteLine("=========================");
-#endif
-
-                using var mergeCmd = new SqlCommand(mergeSql, connection, sqlTransaction);
-                mergeCmd.CommandTimeout = config.TimeoutSeconds;
-
-                // Add deleteScope parameters if any
-                if (deleteScopeParameters?.Count > 0)
-                {
-                    foreach (var p in deleteScopeParameters)
-                    {
-                        mergeCmd.Parameters.Add(p);
-                    }
-                }
-
-                // If identity sync is enabled, read OUTPUT results and sync back to entities
-                if (needsIdentitySync)
-                {
-                    // entitiesList already materialized above
-                    using var outputReader = await mergeCmd.ExecuteReaderAsync(cancellationToken);
-
-                    // Read OUTPUT results and sync identity values back to entities
-                    while (await outputReader.ReadAsync(cancellationToken))
-                    {
-                        var rowIndex = outputReader.GetInt32(0);
-                        var action = outputReader.GetString(outputReader.FieldCount - 1);
-
-                        // Process both INSERT and UPDATE actions
-                        // INSERT: newly created records get their generated identity
-                        // UPDATE: existing records get their identity synced (useful when matching on non-identity columns)
-                        if (action == BulkOperationConstants.MergeActionInsert || action == BulkOperationConstants.MergeActionUpdate)
-                        {
-                            var entity = entities[rowIndex];
-
-                            // Set each identity column value (starting at index 1, after rowIndex)
-                            for (int i = 0; i < identityColumns!.Count; i++)
-                            {
-                                var identityColumn = identityColumns[i];
-                                var identityValue = outputReader.GetValue(i + 1);
-
-                                // Apply ConvertFromProvider if identity column has converter
-                                // Add defensive null check for DBNull.Value (unlikely but safer)
-                                if (identityValue != null && identityValue != DBNull.Value && identityColumn.ValueConverter != null)
-                                {
-                                    identityValue = identityColumn.ValueConverter.ConvertFromProvider.Invoke(identityValue);
-                                }
-
-                                // Use compiled setter to set the identity value
-                                identityColumn.CompiledSetter(entity, identityValue);
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    await mergeCmd.ExecuteNonQueryAsync(cancellationToken);
-                }
-            }
-            finally
-            {
-                // Step 4: Clean up temp table (ensure cleanup even on errors)
-                try
-                {
-                    var dropTempTableSql = $"IF OBJECT_ID('tempdb..{tempTableName}') IS NOT NULL DROP TABLE {tempTableName};";
-                    using var dropCmd = new SqlCommand(dropTempTableSql, connection, sqlTransaction);
-                    await dropCmd.ExecuteNonQueryAsync(cancellationToken);
-                }
-                catch
-                {
-                    // Temp tables are automatically cleaned up on connection close, so ignore errors
-                }
-            }
-        }
-        catch (SqlException ex)
-        {
-            throw new InvalidOperationException($"Bulk upsert failed for entity type '{typeof(T).Name}'. Error: {ex.Message}", ex);
-        }
-        finally
-        {
-            await context.Database.CloseConnectionAsync();
-        }
-    }
+    protected override string NewStagingTableName()
+        => $"{BulkOperationConstants.TempTablePrefix}{Guid.NewGuid():N}";
 
     /// <summary>
     /// Builds CREATE TABLE statement for temporary staging table.
     /// </summary>
-    private static string BuildCreateTempTableSql(string tempTableName, IReadOnlyList<ColumnMetadata> columns, bool includeRowIndex = false)
+    protected override string BuildCreateStagingSql(string stagingTable, IReadOnlyList<ColumnMetadata> columns, bool includeRowIndex)
     {
         // Pre-allocate StringBuilder capacity to avoid reallocations
         // Estimate: ~100 chars base + ~50 chars per column (column name + type + brackets/commas)
         var estimatedSize = 100 + (columns.Count * 50);
         var sql = new StringBuilder(estimatedSize);
-        sql.AppendLine($"CREATE TABLE {tempTableName} (");
+        sql.AppendLine($"CREATE TABLE {stagingTable} (");
 
         // Add row index column as first column if requested
         if (includeRowIndex)
@@ -383,6 +57,219 @@ internal sealed class SqlServerBulkProvider : IBulkProvider
 
         sql.AppendLine(");");
         return sql.ToString();
+    }
+
+    protected override string BuildDropStagingSql(string stagingTable)
+        => $"IF OBJECT_ID('tempdb..{stagingTable}') IS NOT NULL DROP TABLE {stagingTable};";
+
+    protected override async Task BulkLoadToTargetAsync<T>(
+        DbContext context,
+        DbConnection connection,
+        string tableName,
+        IReadOnlyList<ColumnMetadata> columns,
+        IList<T> entities,
+        BulkConfig config,
+        CancellationToken cancellationToken) where T : class
+    {
+        var sqlConnection = (SqlConnection)connection;
+        var sqlTransaction = GetSqlTransaction(context);
+
+        // Configure SqlBulkCopy
+        var bulkCopyOptions = SqlBulkCopyOptions.Default;
+
+        if (config.CheckConstraints)
+            bulkCopyOptions |= SqlBulkCopyOptions.CheckConstraints;
+
+        if (config.FireTriggers)
+            bulkCopyOptions |= SqlBulkCopyOptions.FireTriggers;
+
+        if (config.UseTableLock)
+            bulkCopyOptions |= SqlBulkCopyOptions.TableLock;
+
+        using var bulkCopy = new SqlBulkCopy(sqlConnection, bulkCopyOptions, sqlTransaction)
+        {
+            DestinationTableName = tableName,
+            BatchSize = config.BatchSize,
+            BulkCopyTimeout = config.TimeoutSeconds,
+            EnableStreaming = config.EnableStreaming
+        };
+
+        Debug.WriteLine($"[BULK] BulkInsertAsync inserting {entities.Count} entities into {tableName} with {columns.Count} columns");
+
+        // Map columns
+        foreach (var column in columns)
+        {
+            bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
+        }
+
+        // Create data reader and perform bulk insert
+        using var reader = new EntityDataReader<T>(entities, columns);
+        await bulkCopy.WriteToServerAsync(reader, cancellationToken);
+    }
+
+    protected override async Task BulkLoadToStagingAsync<T>(
+        DbContext context,
+        DbConnection connection,
+        string stagingTable,
+        IReadOnlyList<ColumnMetadata> columns,
+        IList<T> entities,
+        bool includeRowIndex,
+        BulkConfig config,
+        CancellationToken cancellationToken) where T : class
+    {
+        var sqlConnection = (SqlConnection)connection;
+        var sqlTransaction = GetSqlTransaction(context);
+
+        // Bulk insert to temp table (always with KeepIdentity for temp table)
+        var bulkCopyOptions = SqlBulkCopyOptions.KeepIdentity;
+
+        if (config.UseTableLock)
+            bulkCopyOptions |= SqlBulkCopyOptions.TableLock;
+
+        if (config.CheckConstraints)
+            bulkCopyOptions |= SqlBulkCopyOptions.CheckConstraints;
+
+        using var bulkCopy = new SqlBulkCopy(sqlConnection, bulkCopyOptions, sqlTransaction)
+        {
+            DestinationTableName = stagingTable,
+            BatchSize = config.BatchSize,
+            BulkCopyTimeout = config.TimeoutSeconds,
+            EnableStreaming = config.EnableStreaming
+        };
+
+        // Map columns (add row index mapping if needed)
+        if (includeRowIndex)
+        {
+            bulkCopy.ColumnMappings.Add(BulkOperationConstants.RowIndexColumnName, BulkOperationConstants.RowIndexColumnName);
+        }
+
+        foreach (var column in columns)
+        {
+            bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
+        }
+
+        // Bulk insert to temp table
+        using var reader = new EntityDataReader<T>(entities, columns, includeRowIndex);
+        await bulkCopy.WriteToServerAsync(reader, cancellationToken);
+    }
+
+    protected override async Task ExecuteUpsertAsync<T>(
+        DbContext context,
+        DbConnection connection,
+        string targetTable,
+        string stagingTable,
+        IReadOnlyList<ColumnMetadata> columns,
+        IReadOnlyList<ColumnMetadata> matchColumns,
+        List<string>? updateColumnNames,
+        BulkConfig config,
+        IReadOnlyList<ColumnMetadata>? identityColumns,
+        bool needsIdentitySync,
+        bool deleteNotMatchedBySource,
+        string? deleteScopeSql,
+        List<DbParameter>? deleteScopeParameters,
+        IList<T> entities,
+        CancellationToken cancellationToken) where T : class
+    {
+        var mergeSql = BuildMergeSql(
+            targetTable, stagingTable, columns, matchColumns, updateColumnNames, config,
+            identityColumns, deleteNotMatchedBySource, deleteScopeSql);
+
+        // Debug: Print generated SQL
+#if DEBUG
+        Debug.WriteLine("=== GENERATED MERGE SQL ===");
+        Debug.WriteLine($"[BULK] BulkUpsertAsync merging {entities.Count} entities into {targetTable} with {columns.Count} columns, options: {config}");
+        Debug.WriteLine(mergeSql);
+        Debug.WriteLine("=========================");
+#endif
+
+        await using var mergeCmd = CreateCommand(connection, context, mergeSql, config.TimeoutSeconds);
+
+        // Add deleteScope parameters if any
+        if (deleteScopeParameters?.Count > 0)
+        {
+            foreach (var p in deleteScopeParameters)
+            {
+                mergeCmd.Parameters.Add(p);
+            }
+        }
+
+        // If identity sync is enabled, read OUTPUT results and sync back to entities
+        if (needsIdentitySync)
+        {
+            using var outputReader = await mergeCmd.ExecuteReaderAsync(cancellationToken);
+
+            // Read OUTPUT results and sync identity values back to entities
+            while (await outputReader.ReadAsync(cancellationToken))
+            {
+                var action = outputReader.GetString(outputReader.FieldCount - 1);
+
+                // Process both INSERT and UPDATE actions
+                // INSERT: newly created records get their generated identity
+                // UPDATE: existing records get their identity synced (useful when matching on non-identity columns)
+                if (action == BulkOperationConstants.MergeActionInsert || action == BulkOperationConstants.MergeActionUpdate)
+                    BulkProviderHelpers.ApplyIdentityValues(outputReader, entities, identityColumns!);
+            }
+        }
+        else
+        {
+            await mergeCmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    protected override Task ExecuteDeleteNotMatchedAsync(
+        DbContext context,
+        DbConnection connection,
+        string targetTable,
+        string stagingTable,
+        IReadOnlyList<ColumnMetadata> matchColumns,
+        string? deleteScopeSql,
+        List<DbParameter>? deleteScopeParameters,
+        BulkConfig config,
+        CancellationToken cancellationToken)
+        => Task.CompletedTask;
+
+    protected override Task SyncIdentitiesAsync<T>(
+        DbContext context,
+        DbConnection connection,
+        string targetTable,
+        string stagingTable,
+        IReadOnlyList<ColumnMetadata> matchColumns,
+        IReadOnlyList<ColumnMetadata> identityColumns,
+        IList<T> entities,
+        BulkConfig config,
+        CancellationToken cancellationToken) where T : class
+        => Task.CompletedTask;
+
+    protected override string AdaptDeleteScopeSql(string sqlServerStyleWhere) => sqlServerStyleWhere;
+
+    protected override DbCommand CreateCommand(
+        DbConnection connection,
+        DbContext context,
+        string sql,
+        int timeoutSeconds)
+    {
+        var cmd = new SqlCommand(sql, (SqlConnection)connection, GetSqlTransaction(context))
+        {
+            CommandTimeout = timeoutSeconds
+        };
+        return cmd;
+    }
+
+    protected override bool IsProviderException(Exception ex) => ex is SqlException;
+
+    protected override Exception WrapProviderException(Exception ex, string operation, Type entityType)
+        => new InvalidOperationException(
+            $"Bulk {operation} failed for entity type '{entityType.Name}'. Error: {ex.Message}", ex);
+
+    private static SqlTransaction? GetSqlTransaction(DbContext context)
+    {
+        var currentTransaction = context.Database.CurrentTransaction;
+        if (currentTransaction == null)
+            return null;
+
+        return currentTransaction.GetDbTransaction() as SqlTransaction
+            ?? throw new InvalidOperationException(
+                "Current EF transaction is not a SqlTransaction. Bulk operations require the provider transaction type.");
     }
 
     /// <summary>
@@ -422,22 +309,7 @@ internal sealed class SqlServerBulkProvider : IBulkProvider
         var matchedClauseAdded = false;
         if (!options.InsertOnly)
         {
-            // Determine which columns to update (exclude identity columns and match columns)
-            // Use HashSet for O(1) lookup instead of O(m) Any() per column
-            var matchKeyColumnNames = new HashSet<string>(
-                matchKeyColumns.Select(pk => pk.ColumnName),
-                StringComparer.OrdinalIgnoreCase);
-
-            var updateColumns = columns
-                .Where(c => !c.IsIdentity && !matchKeyColumnNames.Contains(c.ColumnName))
-                .ToList();
-
-            // If updateColumnNames is specified, filter to only those columns
-            if (updateColumnNames?.Count > 0)
-            {
-                var updateNamesSet = new HashSet<string>(updateColumnNames, StringComparer.OrdinalIgnoreCase);
-                updateColumns = [.. updateColumns.Where(c => updateNamesSet.Contains(c.PropertyInfo.Name))];
-            }
+            var updateColumns = BulkProviderHelpers.FilterUpdateColumns(columns, matchKeyColumns, updateColumnNames);
 
             if (updateColumns.Count > 0)
             {
@@ -527,44 +399,5 @@ internal sealed class SqlServerBulkProvider : IBulkProvider
         }
 
         return sql.ToString();
-    }
-
-    /// <summary>
-    /// Extracts property names from a MatchOn expression.
-    /// Supports single property (x => x.Email) or anonymous type (x => new { x.Email, x.Username }).
-    /// </summary>
-    private static List<string> ExtractPropertyNamesFromExpression<T>(Expression<Func<T, object>> expression)
-    {
-        var propertyNames = new List<string>();
-
-        if (expression.Body is NewExpression newExpression)
-        {
-            // Anonymous type: x => new { x.Email, x.Username }
-            foreach (var arg in newExpression.Arguments)
-            {
-                if (arg is MemberExpression memberExpr)
-                {
-                    propertyNames.Add(memberExpr.Member.Name);
-                }
-            }
-        }
-        else if (expression.Body is MemberExpression memberExpression)
-        {
-            // Single property: x => x.Email
-            propertyNames.Add(memberExpression.Member.Name);
-        }
-        else if (expression.Body is UnaryExpression unaryExpression &&
-                 unaryExpression.Operand is MemberExpression unaryMember)
-        {
-            // Boxing conversion: x => (object)x.Id
-            propertyNames.Add(unaryMember.Member.Name);
-        }
-
-        if (propertyNames.Count == 0)
-        {
-            throw new ArgumentException("Invalid MatchOn expression. Use either a single property (x => x.Email) or anonymous type (x => new { x.Email, x.Username }).");
-        }
-
-        return propertyNames;
     }
 }
