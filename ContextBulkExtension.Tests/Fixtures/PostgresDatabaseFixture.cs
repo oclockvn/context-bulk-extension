@@ -1,22 +1,22 @@
 using ContextBulkExtension.Tests.TestEntities;
 using Microsoft.EntityFrameworkCore;
-using Testcontainers.MsSql;
+using Testcontainers.PostgreSql;
 
 namespace ContextBulkExtension.Tests.Fixtures;
 
-public class DatabaseFixture : IAsyncLifetime
+public class PostgresDatabaseFixture : IAsyncLifetime
 {
-    private readonly MsSqlContainer? _container;
+    private readonly PostgreSqlContainer? _container;
     private readonly string? _connectionStringOverride;
 
-    public DatabaseFixture()
+    public PostgresDatabaseFixture()
     {
-        // ponytail: allow LocalDB/CI connection when Docker daemon down
-        _connectionStringOverride = Environment.GetEnvironmentVariable("BULK_TEST_SQL_CONNECTION");
+        // ponytail: allow env override when Docker not needed
+        _connectionStringOverride = Environment.GetEnvironmentVariable("BULK_TEST_PG_CONNECTION");
         if (string.IsNullOrWhiteSpace(_connectionStringOverride))
         {
-            _container = new MsSqlBuilder()
-                .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
+            _container = new PostgreSqlBuilder()
+                .WithImage("postgres:16-alpine")
                 .Build();
         }
     }
@@ -30,7 +30,6 @@ public class DatabaseFixture : IAsyncLifetime
         if (_container != null)
             await _container.StartAsync();
 
-        // Create a context just to ensure database schema is created
         await using var context = CreateNewContext();
         await context.Database.EnsureCreatedAsync();
     }
@@ -41,13 +40,13 @@ public class DatabaseFixture : IAsyncLifetime
             await _container.DisposeAsync();
     }
 
-    public TestDbContext CreateNewContext()
+    public PostgresTestDbContext CreateNewContext()
     {
-        var options = new DbContextOptionsBuilder<TestDbContext>()
-            .UseSqlServer(ConnectionString)
+        var options = new DbContextOptionsBuilder<PostgresTestDbContext>()
+            .UseNpgsql(ConnectionString)
             .Options;
 
-        return new TestDbContext(options);
+        return new PostgresTestDbContext(options);
     }
 
     public async Task<List<T>> GetAllEntitiesAsync<T>() where T : class
@@ -69,7 +68,7 @@ public class DatabaseFixture : IAsyncLifetime
         await context.SaveChangesAsync();
     }
 
-    public async Task ExecuteInTransactionAsync(Func<TestDbContext, Task> action)
+    public async Task ExecuteInTransactionAsync(Func<PostgresTestDbContext, Task> action)
     {
         await using var context = CreateNewContext();
         await using var transaction = await context.Database.BeginTransactionAsync();
@@ -90,4 +89,9 @@ public class DatabaseFixture : IAsyncLifetime
         await using var context = CreateNewContext();
         return await context.Set<T>().CountAsync();
     }
+}
+
+[CollectionDefinition("PostgresDatabase")]
+public class PostgresDatabaseCollection : ICollectionFixture<PostgresDatabaseFixture>
+{
 }

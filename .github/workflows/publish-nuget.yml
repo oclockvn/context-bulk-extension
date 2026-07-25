@@ -62,8 +62,8 @@ jobs:
             exit 1
           fi
 
-          # Use MSBuild to evaluate the Version property
-          VERSION=$(dotnet msbuild ContextBulkExtension/ContextBulkExtension.Net8.csproj \
+          # Use MSBuild to evaluate the Version property from SqlServer package
+          VERSION=$(dotnet msbuild ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.Net8.csproj \
             -getProperty:Version \
             -p:PatchNumber=$PATCH_NUMBER \
             -nologo)
@@ -78,20 +78,16 @@ jobs:
           echo "Determined version: $VERSION (via MSBuild)"
           echo "Patch number: $PATCH_NUMBER"
 
-      - name: Build project
+      - name: Build and pack projects
         run: |
-          dotnet build ContextBulkExtension/ContextBulkExtension.Net8.csproj \
-            --configuration Release \
-            --no-incremental \
-            -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
-
-      - name: Pack NuGet package
-        run: |
-          dotnet pack ContextBulkExtension/ContextBulkExtension.Net8.csproj \
-            --configuration Release \
-            --no-build \
-            --output ./artifacts \
-            -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
+          PATCH=${{ steps.version.outputs.PatchNumber }}
+          for proj in \
+            ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.Net8.csproj \
+            ContextBulkExtension.Postgres/ContextBulkExtension.Postgres.Net8.csproj
+          do
+            dotnet build "$proj" --configuration Release --no-incremental -p:PatchNumber=$PATCH
+            dotnet pack "$proj" --configuration Release --no-build --output ./artifacts -p:PatchNumber=$PATCH
+          done
 
       - name: NuGet login (OIDC → temp API key)
         uses: NuGet/login@v1
@@ -108,22 +104,14 @@ jobs:
 
       - name: Generate job summary
         run: |
-          PACKAGE_NAME="ContextBulkExtension"
           PACKAGE_VERSION="${{ steps.version.outputs.version }}"
-          NUGET_URL="https://www.nuget.org/packages/${PACKAGE_NAME}/${PACKAGE_VERSION}"
-
           {
-            echo "## 📦 Published .NET 8 NuGet Package"
+            echo "## Published .NET 8 NuGet Packages"
             echo ""
-            echo "**Package:** \`${PACKAGE_NAME}\`"
             echo "**Version:** \`${PACKAGE_VERSION}\`"
+            echo "**Packages:** SqlServer, Postgres"
             echo "**Target:** .NET 8 / EF Core 8.x"
-            echo "**NuGet.org:** [View Package](${NUGET_URL})"
-            echo ""
-            echo "### Package Details"
-            echo "- Package ID: \`${PACKAGE_NAME}\`"
-            echo "- Version: \`${PACKAGE_VERSION}\`"
-            echo "- Published: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+            echo "**Published:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           } >> $GITHUB_STEP_SUMMARY
 
   build-net10:
@@ -175,8 +163,7 @@ jobs:
             exit 1
           fi
 
-          # Use MSBuild to evaluate the Version property
-          VERSION=$(dotnet msbuild ContextBulkExtension/ContextBulkExtension.csproj \
+          VERSION=$(dotnet msbuild ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.csproj \
             -getProperty:Version \
             -p:PatchNumber=$PATCH_NUMBER \
             -nologo)
@@ -191,20 +178,16 @@ jobs:
           echo "Determined version: $VERSION (via MSBuild)"
           echo "Patch number: $PATCH_NUMBER"
 
-      - name: Build project
+      - name: Build and pack projects
         run: |
-          dotnet build ContextBulkExtension/ContextBulkExtension.csproj \
-            --configuration Release \
-            --no-incremental \
-            -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
-
-      - name: Pack NuGet package
-        run: |
-          dotnet pack ContextBulkExtension/ContextBulkExtension.csproj \
-            --configuration Release \
-            --no-build \
-            --output ./artifacts \
-            -p:PatchNumber=${{ steps.version.outputs.PatchNumber }}
+          PATCH=${{ steps.version.outputs.PatchNumber }}
+          for proj in \
+            ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.csproj \
+            ContextBulkExtension.Postgres/ContextBulkExtension.Postgres.csproj
+          do
+            dotnet build "$proj" --configuration Release --no-incremental -p:PatchNumber=$PATCH
+            dotnet pack "$proj" --configuration Release --no-build --output ./artifacts -p:PatchNumber=$PATCH
+          done
 
       - name: NuGet login (OIDC → temp API key)
         uses: NuGet/login@v1
@@ -221,20 +204,12 @@ jobs:
 
       - name: Generate job summary
         run: |
-          PACKAGE_NAME="ContextBulkExtension"
           PACKAGE_VERSION="${{ steps.version.outputs.version }}"
-          NUGET_URL="https://www.nuget.org/packages/${PACKAGE_NAME}/${PACKAGE_VERSION}"
-
           {
-            echo "## 📦 Published .NET 10 NuGet Package"
+            echo "## Published .NET 10 NuGet Packages"
             echo ""
-            echo "**Package:** \`${PACKAGE_NAME}\`"
             echo "**Version:** \`${PACKAGE_VERSION}\`"
+            echo "**Packages:** SqlServer, Postgres"
             echo "**Target:** .NET 10 / EF Core 10.x"
-            echo "**NuGet.org:** [View Package](${NUGET_URL})"
-            echo ""
-            echo "### Package Details"
-            echo "- Package ID: \`${PACKAGE_NAME}\`"
-            echo "- Version: \`${PACKAGE_VERSION}\`"
-            echo "- Published: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+            echo "**Published:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           } >> $GITHUB_STEP_SUMMARY

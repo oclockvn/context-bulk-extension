@@ -1,69 +1,90 @@
 ## Publishing New Versions
 
+Consumer-facing packages (only these are published):
+
+- `ContextBulkExtension.SqlServer`
+- `ContextBulkExtension.Postgres`
+
+`ContextBulkExtension.Core` is an internal project. Its DLL is embedded inside each provider package (not published separately). If an old Core package exists on nuget.org, unlist/deprecate it manually.
+
+### Versioning
+
+From `Directory.Build.props`:
+
+| Property | Role | Example |
+|----------|------|---------|
+| `BaseVersion` | Middle segment (aligned with EF patch line) | `0.20` |
+| `PatchNumber` | Hotfix at same BaseVersion | `0`, `1`, … |
+
+Resulting package versions:
+
+- .NET 8 / EF 8: `8.{BaseVersion}.{PatchNumber}` → e.g. `8.0.20.0`
+- .NET 10 / EF 10: `10.{BaseVersion}.{PatchNumber}` → e.g. `10.0.20.0`
+
+Tags (`v*`) trigger CI but **do not** set the NuGet version. Bump `BaseVersion` in props (and commit) when the EF line moves; use `patch_number` for hotfixes.
+
 ### Prerequisites
 
-1. **Trusted Publishing Setup on nuget.org:**
+1. **Trusted Publishing Setup on nuget.org** (for GitHub Actions):
    - Log into [nuget.org](https://www.nuget.org)
-   - Navigate to your account settings → **Trusted Publishing**
-   - Add a new trusted publishing policy:
-     - **Repository Owner:** Your GitHub username/org
-     - **Repository:** `ContextBulkExtension` (or your actual repo name)
+   - Account settings → **Trusted Publishing**
+   - Add policy:
+     - **Repository Owner:** your GitHub user/org
+     - **Repository:** `context-bulk-extension` (or actual repo name)
      - **Workflow File:** `publish-nuget.yml`
-     - **Environment:** (leave empty if not using environments)
+     - **Environment:** leave empty if unused
 
-### Publishing Process
+2. **Local push only:** set `NUGET_API_KEY` to a nuget.org API key (or use Trusted Publishing via CI instead).
 
-#### Option 1: Using PowerShell Script (Recommended)
-
-Use the automated script to publish a new version:
+### Option 1: PowerShell script (recommended)
 
 ```powershell
-# Publish version 1.0.0
-.\scripts\publish-nuget.ps1 -Version "1.0.0"
+# Dry run
+.\scripts\publish-nuget.ps1 -DryRun
 
-# Dry run to see what would happen
-.\scripts\publish-nuget.ps1 -Version "1.0.0" -DryRun
+# Bump BaseVersion (EF line moved), pack both TFMs, push tag → CI publish
+.\scripts\publish-nuget.ps1 -BaseVersion "0.21" -PatchNumber 0
 
-# Skip build and tests (if already verified)
-.\scripts\publish-nuget.ps1 -Version "1.0.0" -SkipBuild -SkipTest
+# Hotfix at same BaseVersion; local push with API key
+.\scripts\publish-nuget.ps1 -PatchNumber 1 -LocalPush
+
+# Pack only (no tag, no push)
+.\scripts\publish-nuget.ps1 -SkipTag -SkipPush
 ```
 
-The script will:
-1. Update `BaseVersion` in `Directory.Build.props`
-2. Build the projects (unless `-SkipBuild` is specified)
-3. Run tests (unless `-SkipTest` is specified)
-4. Create a git tag (e.g., `v1.0.0`)
-5. Push the tag to remote, which triggers the GitHub Actions workflow
+Script will:
 
-#### Option 2: Manual Process
+1. Optionally update `BaseVersion` in `Directory.Build.props`
+2. Build and pack SqlServer + Postgres for net8 and net10 into `Nugets/`
+3. Either create/push a `v*` tag (CI Trusted Publishing) **or** `-LocalPush` with `NUGET_API_KEY`
 
-1. Update `BaseVersion` in `Directory.Build.props`:
-   ```xml
-   <BaseVersion>1.0</BaseVersion>  <!-- For version 8.1.0 -->
-   ```
+### Option 2: Tag → GitHub Actions
 
-2. Create and push a git tag:
-   ```bash
-   git tag -a v1.0.0 -m "Release version 1.0.0"
-   git push origin v1.0.0
-   ```
+1. Commit any `BaseVersion` change.
+2. Create and push a tag:
 
-3. The GitHub Actions workflow will automatically:
-   - Build the packaging projects
-   - Pack the NuGet packages
-   - Authenticate using Trusted Publishing (OIDC)
-   - Publish to nuget.org
+```bash
+git tag -a v8.0.20.0 -m "Release 8.0.20.0 / 10.0.20.0"
+git push origin v8.0.20.0
+```
 
-#### Option 3: Manual Workflow Dispatch
+3. Workflow packs SqlServer + Postgres (net8 + net10) and pushes via OIDC.
 
-1. Go to the **Actions** tab in GitHub
-2. Select **Publish NuGet Package** workflow
-3. Click **Run workflow**
-4. Enter the version (e.g., `1.0.0`)
-5. Click **Run workflow**
+### Option 3: Manual workflow dispatch
 
-### Version Tag Format
+1. Actions → **Publish NuGet Package** → **Run workflow**
+2. Enter `patch_number` (default `0`)
+3. Both jobs publish SqlServer + Postgres
 
-Tags must follow semantic versioning: `v1.0.0`, `v1.0.1`, `v2.0.0`, etc.
+### Option 4: Local CLI push
 
-The workflow extracts the version number (without the 'v' prefix) and sets it as `BaseVersion` in `Directory.Build.props`. The final package version will be `8.{BaseVersion}` for EF Core 8.x packages (e.g., `8.1.0`).
+```powershell
+dotnet build ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.Net8.csproj -c Release -p:PatchNumber=0
+dotnet pack  ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.Net8.csproj -c Release --no-build -p:PatchNumber=0
+# repeat for Postgres.Net8, SqlServer.csproj, Postgres.csproj
+
+dotnet nuget push Nugets/net8/*.nupkg  -k $env:NUGET_API_KEY -s https://api.nuget.org/v3/index.json --skip-duplicate
+dotnet nuget push Nugets/net10/*.nupkg -k $env:NUGET_API_KEY -s https://api.nuget.org/v3/index.json --skip-duplicate
+```
+
+Or: `.\scripts\publish-nuget.ps1 -LocalPush`

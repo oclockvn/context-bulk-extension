@@ -1,15 +1,15 @@
 <Project>
     <PropertyGroup>
         <Title>ContextBulkExtension</Title>
-        <BasePackageId>ContextBulkExtension</BasePackageId>
-        <PackageId>$(BasePackageId)</PackageId>
+        <!-- PackageId = project name minus .Net8 twin suffix (e.g. ContextBulkExtension.SqlServer) -->
+        <PackageId>$([System.String]::Copy('$(MSBuildProjectName)').Replace('.Net8',''))</PackageId>
         <BaseVersion>0.20</BaseVersion>
         <Nullable>enable</Nullable>
         <Authors>oclockvn</Authors>
-        <Description>High-performance bulk operations for Entity Framework Core using SQL Server's SqlBulkCopy. Designed for efficiently inserting millions of records.</Description>
+        <Description>High-performance bulk operations for Entity Framework Core (SQL Server and PostgreSQL).</Description>
         <PackageProjectUrl>https://github.com/oclockvn/context-bulk-extension</PackageProjectUrl>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
-        <PackageTags>EntityFrameworkCore Entity Framework Core EFCore EF Core SQL Server Bulk Batch Extensions Insert Update Delete</PackageTags>
+        <PackageTags>EntityFrameworkCore Entity Framework Core EFCore EF Core SQL Server PostgreSQL Bulk Batch Extensions Insert Update Delete</PackageTags>
         <RepositoryUrl>https://github.com/oclockvn/context-bulk-extension</RepositoryUrl>
         <RepositoryType>Git</RepositoryType>
         <AllowedOutputExtensionsInPackageBuildOutputFolder>$(AllowedOutputExtensionsInPackageBuildOutputFolder);.pdb</AllowedOutputExtensionsInPackageBuildOutputFolder>
@@ -33,7 +33,9 @@
         <DefineConstants>$(DefineConstants);V8</DefineConstants>
         <AssemblyVersion>8.$(BaseVersion).$(PatchNumber)</AssemblyVersion>
         <FileVersion>8.$(BaseVersion).$(PatchNumber)</FileVersion>
-        <PackageOutputPath>$(SolutionDir)Nugets\net8</PackageOutputPath>
+        <PackageOutputPath>$(MSBuildThisFileDirectory)Nugets\net8</PackageOutputPath>
+        <!-- Same assembly name as net10 twin so BulkProviderRegistry LoadFrom finds ContextBulkExtension.*.dll -->
+        <AssemblyName>$([System.String]::Copy('$(MSBuildProjectName)').Replace('.Net8',''))</AssemblyName>
     </PropertyGroup>
 
     <!-- .NET 10 specific configuration (default) -->
@@ -45,12 +47,29 @@
         <DefineConstants>$(DefineConstants);V10</DefineConstants>
         <AssemblyVersion>10.$(BaseVersion).$(PatchNumber)</AssemblyVersion>
         <FileVersion>10.$(BaseVersion).$(PatchNumber)</FileVersion>
-        <PackageOutputPath>$(SolutionDir)Nugets\net10</PackageOutputPath>
+        <PackageOutputPath>$(MSBuildThisFileDirectory)Nugets\net10</PackageOutputPath>
     </PropertyGroup>
 
     <PropertyGroup>
         <EnablePackageValidation>true</EnablePackageValidation>
     </PropertyGroup>
+
+    <!-- Embed Core.dll from provider output into nupkg (no Core NuGet dependency) -->
+    <PropertyGroup Condition="$(MSBuildProjectName.Contains('SqlServer')) Or $(MSBuildProjectName.Contains('Postgres'))">
+        <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeEmbeddedCoreInPackage</TargetsForTfmSpecificBuildOutput>
+    </PropertyGroup>
+
+    <Target Name="IncludeEmbeddedCoreInPackage"
+            Condition="$(MSBuildProjectName.Contains('SqlServer')) Or $(MSBuildProjectName.Contains('Postgres'))">
+        <ItemGroup>
+            <BuildOutputInPackage Include="$(TargetDir)ContextBulkExtension.Core.dll"
+                                  Condition="Exists('$(TargetDir)ContextBulkExtension.Core.dll')" />
+            <BuildOutputInPackage Include="$(TargetDir)ContextBulkExtension.Core.pdb"
+                                  Condition="Exists('$(TargetDir)ContextBulkExtension.Core.pdb')" />
+            <BuildOutputInPackage Include="$(TargetDir)ContextBulkExtension.Core.xml"
+                                  Condition="Exists('$(TargetDir)ContextBulkExtension.Core.xml')" />
+        </ItemGroup>
+    </Target>
 
     <ItemGroup>
         <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All"/>

@@ -1,10 +1,12 @@
+using ContextBulkExtension.Core;
 using ContextBulkExtension.Tests.Fixtures;
 using ContextBulkExtension.Tests.TestEntities;
 using Microsoft.EntityFrameworkCore;
 
 namespace ContextBulkExtension.Tests;
 
-public class BulkInsertTests(DatabaseFixture fixture) : IClassFixture<DatabaseFixture>, IAsyncLifetime
+[Collection("Database")]
+public class BulkInsertTests(DatabaseFixture fixture) : IAsyncLifetime
 {
     private readonly DatabaseFixture _fixture = fixture;
 
