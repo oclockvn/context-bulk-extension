@@ -44,42 +44,15 @@ internal abstract class BulkProviderBase : IBulkProvider
         CancellationToken cancellationToken) where T : class;
 
     protected abstract Task ExecuteUpsertAsync<T>(
-        DbContext context,
-        DbConnection connection,
-        string targetTable,
-        string stagingTable,
-        IReadOnlyList<ColumnMetadata> columns,
-        IReadOnlyList<ColumnMetadata> matchColumns,
-        List<string>? updateColumnNames,
-        BulkConfig config,
-        IReadOnlyList<ColumnMetadata>? identityColumns,
-        bool needsIdentitySync,
-        bool deleteNotMatchedBySource,
-        string? deleteScopeSql,
-        List<DbParameter>? deleteScopeParameters,
-        IList<T> entities,
+        UpsertRequest<T> request,
         CancellationToken cancellationToken) where T : class;
 
-    protected abstract Task ExecuteDeleteNotMatchedAsync(
-        DbContext context,
-        DbConnection connection,
-        string targetTable,
-        string stagingTable,
-        IReadOnlyList<ColumnMetadata> matchColumns,
-        string? deleteScopeSql,
-        List<DbParameter>? deleteScopeParameters,
-        BulkConfig config,
-        CancellationToken cancellationToken);
+    protected abstract Task ExecuteDeleteNotMatchedAsync<T>(
+        UpsertRequest<T> request,
+        CancellationToken cancellationToken) where T : class;
 
     protected abstract Task SyncIdentitiesAsync<T>(
-        DbContext context,
-        DbConnection connection,
-        string targetTable,
-        string stagingTable,
-        IReadOnlyList<ColumnMetadata> matchColumns,
-        IReadOnlyList<ColumnMetadata> identityColumns,
-        IList<T> entities,
-        BulkConfig config,
+        UpsertRequest<T> request,
         CancellationToken cancellationToken) where T : class;
 
     protected abstract string AdaptDeleteScopeSql(string sqlServerStyleWhere);
@@ -166,11 +139,11 @@ internal abstract class BulkProviderBase : IBulkProvider
         await context.Database.OpenConnectionAsync(cancellationToken);
 
         IDbContextTransaction? ownedTransaction = null;
-        if (OwnsTransactionWhenMissing && context.Database.CurrentTransaction == null)
-            ownedTransaction = await context.Database.BeginTransactionAsync(cancellationToken);
-
         try
         {
+            if (OwnsTransactionWhenMissing && context.Database.CurrentTransaction == null)
+                ownedTransaction = await context.Database.BeginTransactionAsync(cancellationToken);
+
             await using (var createCmd = CreateCommand(connection, context, BuildCreateStagingSql(stagingTable, columns, needsIdentitySync), config.TimeoutSeconds))
             {
                 await createCmd.ExecuteNonQueryAsync(cancellationToken);
@@ -193,50 +166,31 @@ internal abstract class BulkProviderBase : IBulkProvider
                     deleteScopeSql = AdaptDeleteScopeSql(deleteScopeSql);
                 }
 
-                await ExecuteUpsertAsync(
-                    context,
-                    connection,
-                    tableName,
-                    stagingTable,
-                    columns,
-                    matchColumns,
-                    updateColumnNames,
-                    config,
-                    identityColumns,
-                    needsIdentitySync,
-                    deleteNotMatchedBySource && BundlesDeleteInUpsert,
-                    deleteScopeSql,
-                    deleteScopeParameters,
-                    entities,
-                    cancellationToken);
+                var request = new UpsertRequest<T>
+                {
+                    Context = context,
+                    Connection = connection,
+                    TargetTable = tableName,
+                    StagingTable = stagingTable,
+                    Columns = columns,
+                    MatchColumns = matchColumns,
+                    UpdateColumnNames = updateColumnNames,
+                    Config = config,
+                    IdentityColumns = identityColumns,
+                    NeedsIdentitySync = needsIdentitySync,
+                    BundleDeleteNotMatched = deleteNotMatchedBySource && BundlesDeleteInUpsert,
+                    DeleteScopeSql = deleteScopeSql,
+                    DeleteScopeParameters = deleteScopeParameters,
+                    Entities = entities
+                };
+
+                await ExecuteUpsertAsync(request, cancellationToken);
 
                 if (deleteNotMatchedBySource && !BundlesDeleteInUpsert)
-                {
-                    await ExecuteDeleteNotMatchedAsync(
-                        context,
-                        connection,
-                        tableName,
-                        stagingTable,
-                        matchColumns,
-                        deleteScopeSql,
-                        deleteScopeParameters,
-                        config,
-                        cancellationToken);
-                }
+                    await ExecuteDeleteNotMatchedAsync(request, cancellationToken);
 
                 if (needsIdentitySync && !BundlesIdentityInUpsert)
-                {
-                    await SyncIdentitiesAsync(
-                        context,
-                        connection,
-                        tableName,
-                        stagingTable,
-                        matchColumns,
-                        identityColumns!,
-                        entities,
-                        config,
-                        cancellationToken);
-                }
+                    await SyncIdentitiesAsync(request, cancellationToken);
 
                 if (ownedTransaction != null)
                     await ownedTransaction.CommitAsync(cancellationToken);

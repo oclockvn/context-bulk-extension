@@ -69,44 +69,33 @@ internal sealed class PostgresBulkProvider : BulkProviderBase
     }
 
     protected override async Task ExecuteUpsertAsync<T>(
-        DbContext context,
-        DbConnection connection,
-        string targetTable,
-        string stagingTable,
-        IReadOnlyList<ColumnMetadata> columns,
-        IReadOnlyList<ColumnMetadata> matchColumns,
-        List<string>? updateColumnNames,
-        BulkConfig config,
-        IReadOnlyList<ColumnMetadata>? identityColumns,
-        bool needsIdentitySync,
-        bool deleteNotMatchedBySource,
-        string? deleteScopeSql,
-        List<DbParameter>? deleteScopeParameters,
-        IList<T> entities,
+        UpsertRequest<T> request,
         CancellationToken cancellationToken)
     {
         var upsertSql = BuildUpsertSql(
-            targetTable, stagingTable, columns, matchColumns, updateColumnNames, config, identityColumns);
-        await using var upsertCmd = CreateCommand(connection, context, upsertSql, config.TimeoutSeconds);
+            request.TargetTable,
+            request.StagingTable,
+            request.Columns,
+            request.MatchColumns,
+            request.UpdateColumnNames,
+            request.Config,
+            request.IdentityColumns);
+        await using var upsertCmd = CreateCommand(
+            request.Connection, request.Context, upsertSql, request.Config.TimeoutSeconds);
         await upsertCmd.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    protected override async Task ExecuteDeleteNotMatchedAsync(
-        DbContext context,
-        DbConnection connection,
-        string targetTable,
-        string stagingTable,
-        IReadOnlyList<ColumnMetadata> matchColumns,
-        string? deleteScopeSql,
-        List<DbParameter>? deleteScopeParameters,
-        BulkConfig config,
+    protected override async Task ExecuteDeleteNotMatchedAsync<T>(
+        UpsertRequest<T> request,
         CancellationToken cancellationToken)
     {
-        var deleteSql = BuildDeleteNotMatchedSql(targetTable, stagingTable, matchColumns, deleteScopeSql);
-        await using var deleteCmd = CreateCommand(connection, context, deleteSql, config.TimeoutSeconds);
-        if (deleteScopeParameters?.Count > 0)
+        var deleteSql = BuildDeleteNotMatchedSql(
+            request.TargetTable, request.StagingTable, request.MatchColumns, request.DeleteScopeSql);
+        await using var deleteCmd = CreateCommand(
+            request.Connection, request.Context, deleteSql, request.Config.TimeoutSeconds);
+        if (request.DeleteScopeParameters?.Count > 0)
         {
-            foreach (var p in deleteScopeParameters)
+            foreach (var p in request.DeleteScopeParameters)
                 deleteCmd.Parameters.Add(p);
         }
 
@@ -114,25 +103,21 @@ internal sealed class PostgresBulkProvider : BulkProviderBase
     }
 
     protected override async Task SyncIdentitiesAsync<T>(
-        DbContext context,
-        DbConnection connection,
-        string targetTable,
-        string stagingTable,
-        IReadOnlyList<ColumnMetadata> matchColumns,
-        IReadOnlyList<ColumnMetadata> identityColumns,
-        IList<T> entities,
-        BulkConfig config,
+        UpsertRequest<T> request,
         CancellationToken cancellationToken)
     {
-        var selectSql = BuildIdentitySelectSql(targetTable, stagingTable, matchColumns, identityColumns);
-        await using var selectCmd = CreateCommand(connection, context, selectSql, config.TimeoutSeconds);
+        var identityColumns = request.IdentityColumns!;
+        var selectSql = BuildIdentitySelectSql(
+            request.TargetTable, request.StagingTable, request.MatchColumns, identityColumns);
+        await using var selectCmd = CreateCommand(
+            request.Connection, request.Context, selectSql, request.Config.TimeoutSeconds);
         await using var reader = await selectCmd.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
-            BulkProviderHelpers.ApplyIdentityValues(reader, entities, identityColumns);
+            BulkProviderHelpers.ApplyIdentityValues(reader, request.Entities, identityColumns);
     }
 
     protected override string AdaptDeleteScopeSql(string sqlServerStyleWhere)
-        => ToPostgresTargetQualified(sqlServerStyleWhere);
+        => BulkProviderHelpers.ToPostgresTargetQualified(sqlServerStyleWhere);
 
     protected override DbCommand CreateCommand(
         DbConnection connection,
@@ -246,6 +231,8 @@ internal sealed class PostgresBulkProvider : BulkProviderBase
         if (writeIdentityToStaging)
         {
             // INSERT…RETURNING → pair by __RowIndex order → UPDATE staging identity cols (map C)
+            // Ceiling: ROW_NUMBER pairing assumes identity assigned in __RowIndex insert order (serial/bigserial).
+            BulkProviderHelpers.EnsurePostgresIdentityOutputSupported(identityColumns!);
             var identities = identityColumns!;
             sql.AppendLine("WITH to_insert AS (");
             sql.Append($"    SELECT source.{rowIndex}");
@@ -375,10 +362,6 @@ internal sealed class PostgresBulkProvider : BulkProviderBase
         sql.AppendLine(";");
         return sql.ToString();
     }
-
-    // ExpressionHelper emits SQL Server bracket identifiers; map to Postgres quotes for deleteScope
-    private static string ToPostgresTargetQualified(string sqlServerStyleWhere)
-        => sqlServerStyleWhere.Replace("[", "\"", StringComparison.Ordinal).Replace("]", "\"", StringComparison.Ordinal);
 
     protected override string QuoteIdentifier(string identifier)
     {

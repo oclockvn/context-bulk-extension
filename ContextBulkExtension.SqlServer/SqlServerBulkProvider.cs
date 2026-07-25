@@ -154,47 +154,42 @@ internal sealed class SqlServerBulkProvider : BulkProviderBase
     }
 
     protected override async Task ExecuteUpsertAsync<T>(
-        DbContext context,
-        DbConnection connection,
-        string targetTable,
-        string stagingTable,
-        IReadOnlyList<ColumnMetadata> columns,
-        IReadOnlyList<ColumnMetadata> matchColumns,
-        List<string>? updateColumnNames,
-        BulkConfig config,
-        IReadOnlyList<ColumnMetadata>? identityColumns,
-        bool needsIdentitySync,
-        bool deleteNotMatchedBySource,
-        string? deleteScopeSql,
-        List<DbParameter>? deleteScopeParameters,
-        IList<T> entities,
+        UpsertRequest<T> request,
         CancellationToken cancellationToken) where T : class
     {
         var mergeSql = BuildMergeSql(
-            targetTable, stagingTable, columns, matchColumns, updateColumnNames, config,
-            identityColumns, deleteNotMatchedBySource, deleteScopeSql);
+            request.TargetTable,
+            request.StagingTable,
+            request.Columns,
+            request.MatchColumns,
+            request.UpdateColumnNames,
+            request.Config,
+            request.IdentityColumns,
+            request.BundleDeleteNotMatched,
+            request.DeleteScopeSql);
 
         // Debug: Print generated SQL
 #if DEBUG
         Debug.WriteLine("=== GENERATED MERGE SQL ===");
-        Debug.WriteLine($"[BULK] BulkUpsertAsync merging {entities.Count} entities into {targetTable} with {columns.Count} columns, options: {config}");
+        Debug.WriteLine($"[BULK] BulkUpsertAsync merging {request.Entities.Count} entities into {request.TargetTable} with {request.Columns.Count} columns, options: {request.Config}");
         Debug.WriteLine(mergeSql);
         Debug.WriteLine("=========================");
 #endif
 
-        await using var mergeCmd = CreateCommand(connection, context, mergeSql, config.TimeoutSeconds);
+        await using var mergeCmd = CreateCommand(
+            request.Connection, request.Context, mergeSql, request.Config.TimeoutSeconds);
 
         // Add deleteScope parameters if any
-        if (deleteScopeParameters?.Count > 0)
+        if (request.DeleteScopeParameters?.Count > 0)
         {
-            foreach (var p in deleteScopeParameters)
+            foreach (var p in request.DeleteScopeParameters)
             {
                 mergeCmd.Parameters.Add(p);
             }
         }
 
         // If identity sync is enabled, read OUTPUT results and sync back to entities
-        if (needsIdentitySync)
+        if (request.NeedsIdentitySync)
         {
             using var outputReader = await mergeCmd.ExecuteReaderAsync(cancellationToken);
 
@@ -207,7 +202,8 @@ internal sealed class SqlServerBulkProvider : BulkProviderBase
                 // INSERT: newly created records get their generated identity
                 // UPDATE: existing records get their identity synced (useful when matching on non-identity columns)
                 if (action == BulkOperationConstants.MergeActionInsert || action == BulkOperationConstants.MergeActionUpdate)
-                    BulkProviderHelpers.ApplyIdentityValues(outputReader, entities, identityColumns!);
+                    BulkProviderHelpers.ApplyIdentityValues(
+                        outputReader, request.Entities, request.IdentityColumns!);
             }
         }
         else
@@ -216,29 +212,17 @@ internal sealed class SqlServerBulkProvider : BulkProviderBase
         }
     }
 
-    protected override Task ExecuteDeleteNotMatchedAsync(
-        DbContext context,
-        DbConnection connection,
-        string targetTable,
-        string stagingTable,
-        IReadOnlyList<ColumnMetadata> matchColumns,
-        string? deleteScopeSql,
-        List<DbParameter>? deleteScopeParameters,
-        BulkConfig config,
+    protected override Task ExecuteDeleteNotMatchedAsync<T>(
+        UpsertRequest<T> request,
         CancellationToken cancellationToken)
-        => Task.CompletedTask;
+        => throw new NotSupportedException(
+            "SqlServer bundles WHEN NOT MATCHED BY SOURCE delete into MERGE; ExecuteDeleteNotMatchedAsync must not be called.");
 
     protected override Task SyncIdentitiesAsync<T>(
-        DbContext context,
-        DbConnection connection,
-        string targetTable,
-        string stagingTable,
-        IReadOnlyList<ColumnMetadata> matchColumns,
-        IReadOnlyList<ColumnMetadata> identityColumns,
-        IList<T> entities,
-        BulkConfig config,
-        CancellationToken cancellationToken) where T : class
-        => Task.CompletedTask;
+        UpsertRequest<T> request,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException(
+            "SqlServer bundles identity OUTPUT into MERGE; SyncIdentitiesAsync must not be called.");
 
     protected override string AdaptDeleteScopeSql(string sqlServerStyleWhere) => sqlServerStyleWhere;
 

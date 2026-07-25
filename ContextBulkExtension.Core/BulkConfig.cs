@@ -48,11 +48,14 @@ public record BulkConfig
     public bool InsertOnly { get; set; } = false;
 
     /// <summary>
-    /// When true, syncs identity values back to the original entities after upsert operation.
-    /// This is useful when matching on non-identity columns (e.g., Email, Username) and you need the identity values populated.
+    /// When true, syncs identity values back to the original entities after upsert (or after
+    /// <c>BulkInsertAsync</c>, which routes through the staging-based upsert path when this is set).
+    /// Useful when matching on non-identity columns (e.g. Email) and you need generated keys populated.
     /// - INSERT: Syncs newly generated identity values
-    /// - UPDATE: Syncs existing identity values from database to entities
-    /// Adds ~10-20% overhead for tracking and mapping identity values.
+    /// - UPDATE: Syncs existing identity values from the database to entities
+    /// Adds ~10-20% overhead for tracking and mapping. On <c>BulkInsertAsync</c>, prefer the raw
+    /// bulk load (SqlBulkCopy / COPY) when you do not need keys back — enabling this flag is slower
+    /// than a plain insert because it creates a staging table and runs MERGE/CTE upsert.
     /// Default is false (no identity synchronization).
     /// </summary>
     public bool IdentityOutput { get; set; } = false;

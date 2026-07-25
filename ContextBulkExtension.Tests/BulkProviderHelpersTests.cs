@@ -65,7 +65,83 @@ public class BulkProviderHelpersTests
         Assert.Equal(2, result.Count);
     }
 
-    private static ColumnMetadata Col(string propName, string columnName, bool isIdentity = false, bool isPk = false)
+    [Fact]
+    public void EnsurePostgresIdentityOutputSupported_SingleInt_Ok()
+    {
+        var id = Col(nameof(Sample.Id), "Id", isIdentity: true, isPk: true);
+
+        BulkProviderHelpers.EnsurePostgresIdentityOutputSupported([id]);
+    }
+
+    [Fact]
+    public void EnsurePostgresIdentityOutputSupported_SingleLong_Ok()
+    {
+        var id = Col(nameof(Sample.Id), "Id", isIdentity: true, isPk: true, clrType: typeof(long));
+
+        BulkProviderHelpers.EnsurePostgresIdentityOutputSupported([id]);
+    }
+
+    [Fact]
+    public void EnsurePostgresIdentityOutputSupported_ValueConvertedLong_Ok()
+    {
+        var id = Col(
+            nameof(Sample.Id),
+            "Id",
+            isIdentity: true,
+            isPk: true,
+            clrType: typeof(Guid),
+            providerClrType: typeof(long));
+
+        BulkProviderHelpers.EnsurePostgresIdentityOutputSupported([id]);
+    }
+
+    [Fact]
+    public void EnsurePostgresIdentityOutputSupported_Guid_Throws()
+    {
+        var id = Col(nameof(Sample.Id), "Id", isIdentity: true, isPk: true, clrType: typeof(Guid));
+
+        var ex = Assert.Throws<NotSupportedException>(
+            () => BulkProviderHelpers.EnsurePostgresIdentityOutputSupported([id]));
+
+        Assert.Contains("serial/bigserial", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void EnsurePostgresIdentityOutputSupported_Multiple_Throws()
+    {
+        var id = Col(nameof(Sample.Id), "Id", isIdentity: true, isPk: true);
+        var points = Col(nameof(Sample.Points), "Points", isIdentity: true);
+
+        var ex = Assert.Throws<NotSupportedException>(
+            () => BulkProviderHelpers.EnsurePostgresIdentityOutputSupported([id, points]));
+
+        Assert.Contains("single", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void EnsurePostgresIdentityOutputSupported_Empty_Throws()
+    {
+        Assert.Throws<NotSupportedException>(
+            () => BulkProviderHelpers.EnsurePostgresIdentityOutputSupported([]));
+    }
+
+    [Theory]
+    [InlineData("target.[AccountId] = @p0", "target.\"AccountId\" = @p0")]
+    [InlineData("(target.[A] = @p0 AND target.[B] = @p1)", "(target.\"A\" = @p0 AND target.\"B\" = @p1)")]
+    [InlineData("target.[Col]]] = @p0", "target.\"Col]\" = @p0")]
+    [InlineData("target.[Weird\"Name] = @p0", "target.\"Weird\"\"Name\" = @p0")]
+    public void ToPostgresTargetQualified_RewritesBrackets(string input, string expected)
+    {
+        Assert.Equal(expected, BulkProviderHelpers.ToPostgresTargetQualified(input));
+    }
+
+    private static ColumnMetadata Col(
+        string propName,
+        string columnName,
+        bool isIdentity = false,
+        bool isPk = false,
+        Type? clrType = null,
+        Type? providerClrType = null)
     {
         var prop = typeof(Sample).GetProperty(propName, BindingFlags.Public | BindingFlags.Instance)!;
         return new ColumnMetadata
@@ -73,8 +149,8 @@ public class BulkProviderHelpersTests
             ColumnName = columnName,
             SqlType = "nvarchar",
             PropertyInfo = prop,
-            ClrType = prop.PropertyType,
-            ProviderClrType = prop.PropertyType,
+            ClrType = clrType ?? prop.PropertyType,
+            ProviderClrType = providerClrType ?? clrType ?? prop.PropertyType,
             PropertyName = propName,
             CompiledGetter = _ => null,
             CompiledSetter = (_, _) => { },

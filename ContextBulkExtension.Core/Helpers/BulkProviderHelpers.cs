@@ -1,11 +1,53 @@
 using System.Data.Common;
 using System.Linq.Expressions;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 
 namespace ContextBulkExtension.Core.Helpers;
 
 internal static class BulkProviderHelpers
 {
+    private static readonly Regex SqlServerBracketIdentifier = new(
+        @"\[((?:\]\]|[^\]])*)\]",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// PostgreSQL IdentityOutput pairs RETURNING rows to staging via ROW_NUMBER ordered by
+    /// the identity column vs __RowIndex. That requires a single monotonic int/long identity
+    /// (serial/bigserial / GENERATED … AS IDENTITY). Guid/random/composite identities are unsupported.
+    /// </summary>
+    public static void EnsurePostgresIdentityOutputSupported(IReadOnlyList<ColumnMetadata> identityColumns)
+    {
+        if (identityColumns.Count != 1)
+        {
+            throw new NotSupportedException(
+                "PostgreSQL IdentityOutput requires a single serial/bigserial (int/long) identity column.");
+        }
+
+        var clr = Nullable.GetUnderlyingType(identityColumns[0].ProviderClrType)
+            ?? identityColumns[0].ProviderClrType;
+        if (clr != typeof(int) && clr != typeof(long))
+        {
+            throw new NotSupportedException(
+                $"PostgreSQL IdentityOutput requires a single serial/bigserial identity column (int/long). Got '{clr.Name}'.");
+        }
+    }
+
+    /// <summary>
+    /// Rewrites ExpressionHelper SQL Server bracket identifiers to Postgres double-quoted
+    /// identifiers, unescaping ]] → ] and escaping " → "".
+    /// </summary>
+    public static string ToPostgresTargetQualified(string sqlServerStyleWhere)
+    {
+        ArgumentNullException.ThrowIfNull(sqlServerStyleWhere);
+        return SqlServerBracketIdentifier.Replace(sqlServerStyleWhere, static match =>
+        {
+            var raw = match.Groups[1].Value.Replace("]]", "]", StringComparison.Ordinal);
+            var escaped = raw.Replace("\"", "\"\"", StringComparison.Ordinal);
+            return $"\"{escaped}\"";
+        });
+    }
+
     public static List<ColumnMetadata> FilterUpdateColumns(
         IReadOnlyList<ColumnMetadata> columns,
         IReadOnlyList<ColumnMetadata> matchKeyColumns,

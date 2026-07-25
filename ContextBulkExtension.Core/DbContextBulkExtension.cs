@@ -17,6 +17,8 @@ public static class DbContextBulkExtension
 
     /// <summary>
     /// Performs a high-performance bulk insert of entities with custom options.
+    /// When <see cref="BulkConfig.IdentityOutput"/> is true, routes through staging upsert
+    /// (InsertOnly) so generated identity values can be read back.
     /// </summary>
     public static async Task BulkInsertAsync<T>(this DbContext context, IList<T> entities, BulkConfig config, CancellationToken cancellationToken = default) where T : class
     {
