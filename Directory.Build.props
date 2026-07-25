@@ -22,10 +22,15 @@
     <PropertyGroup>
         <PatchNumber Condition="'$(PatchNumber)' == ''">0</PatchNumber>
         <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+        <!-- Twin Net8/Net10 csproj share a folder; keep each twin's obj out of the other's **/*.cs glob -->
+        <DefaultItemExcludes>$(DefaultItemExcludes);obj\net8\**;obj\net10\**</DefaultItemExcludes>
     </PropertyGroup>
     
     <!-- .NET 8 specific configuration -->
     <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('Net8'))">
+        <!-- Twin *.Net8.csproj share folder with net10 twin; isolate obj so project.assets.json does not collide -->
+        <BaseIntermediateOutputPath>obj\net8\</BaseIntermediateOutputPath>
+        <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
         <!-- Note: Can override BaseVersion here for Net8-specific versioning if needed -->
         <!-- Example: <BaseVersion>0.21</BaseVersion> would produce 8.0.21.X -->
         <Version>8.$(BaseVersion).$(PatchNumber)</Version>
@@ -40,6 +45,9 @@
 
     <!-- .NET 10 specific configuration (default) -->
     <PropertyGroup Condition="!$(MSBuildProjectName.EndsWith('Net8'))">
+        <!-- Twin *.csproj share folder with Net8 twin; isolate obj so project.assets.json does not collide -->
+        <BaseIntermediateOutputPath>obj\net10\</BaseIntermediateOutputPath>
+        <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
         <!-- Note: Can override BaseVersion here for Net10-specific versioning if needed -->
         <!-- Example: <BaseVersion>0.1</BaseVersion> would produce 10.0.1.X -->
         <Version>10.$(BaseVersion).$(PatchNumber)</Version>

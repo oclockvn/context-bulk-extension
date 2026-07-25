@@ -24,6 +24,9 @@ param(
     [switch]$LocalPush,
 
     [Parameter(Mandatory = $false)]
+    [string]$ApiKey,
+
+    [Parameter(Mandatory = $false)]
     [switch]$DryRun
 )
 
@@ -60,7 +63,7 @@ if ($DryRun) {
     else { Write-Host "  1. Keep existing BaseVersion" }
     Write-Host "  2. Build/pack SqlServer + Postgres (net8 + net10) unless -SkipBuild"
     Write-Host "  3. Run tests unless -SkipTest"
-    if ($LocalPush) { Write-Host "  4. Local nuget push Nugets/net8 + Nugets/net10 (NUGET_API_KEY)" }
+    if ($LocalPush) { Write-Host "  4. Local nuget push Nugets/net8 + Nugets/net10 (-ApiKey or NUGET_API_KEY)" }
     elseif (-not $SkipTag) { Write-Host "  4. Create/push git tag (triggers CI) unless -SkipTag/-SkipPush" }
     else { Write-Host "  4. Skip tag/push" }
     exit 0
@@ -107,8 +110,9 @@ if (-not $SkipTest) {
 }
 
 if ($LocalPush) {
-    if (-not $env:NUGET_API_KEY) {
-        Write-Error "NUGET_API_KEY env var required for -LocalPush"
+    if (-not $ApiKey) { $ApiKey = $env:NUGET_API_KEY }
+    if (-not $ApiKey) {
+        Write-Error "-ApiKey required for -LocalPush (or set NUGET_API_KEY)"
         exit 1
     }
     Write-Host "`nPushing to nuget.org..." -ForegroundColor Green
@@ -122,7 +126,7 @@ if ($LocalPush) {
             }
             Write-Host "  push $($_.Name)" -ForegroundColor DarkGray
             dotnet nuget push $_.FullName `
-                --api-key $env:NUGET_API_KEY `
+                --api-key $ApiKey `
                 --source https://api.nuget.org/v3/index.json `
                 --skip-duplicate
             if ($LASTEXITCODE -ne 0) { Write-Error "Push failed: $($_.Name)"; exit 1 }
