@@ -1,6 +1,6 @@
 <Solution>
   <Project Path="ContextBulkExtension.Core/ContextBulkExtension.Core.csproj" />
-  <Project Path="ContextBulkExtension.PostgreSql/ContextBulkExtension.PostgreSql.csproj" />
+  <Project Path="ContextBulkExtension.Postgres/ContextBulkExtension.Postgres.csproj" />
   <Project Path="ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.csproj" />
   <Project Path="ContextBulkExtension.Tests/ContextBulkExtension.Tests.csproj" Id="f73601e7-99be-40ad-9b83-19336348a6af" />
 </Solution>

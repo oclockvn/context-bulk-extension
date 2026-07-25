@@ -18,28 +18,36 @@
 - YAGNI: no new packages; no dialect-agnostic ExpressionHelper rewrite (bracket unescape is enough for #3).
 - Commits: one commit per task after that task’s tests pass.
 
+
+
 ## File Structure
 
-| File | Responsibility |
-|------|----------------|
-| `ContextBulkExtension.Core/Abstractions/BulkProviderBase.cs` | Move open/begin inside try (#1); build/pass `UpsertRequest<T>` (#4) |
-| `ContextBulkExtension.Core/Abstractions/UpsertRequest.cs` | **Create** — shared upsert/delete/sync request record (#4) |
-| `ContextBulkExtension.Core/Helpers/BulkProviderHelpers.cs` | Add `EnsurePostgresIdentityOutputSupported` (#2) + `ToPostgresTargetQualified` (#3) |
-| `ContextBulkExtension.Core/BulkConfig.cs` | Expand `IdentityOutput` XML doc (#6) |
-| `ContextBulkExtension.Core/DbContextBulkExtension.cs` | Optional one-line XML note on `BulkInsertAsync` overload (#6) |
-| `ContextBulkExtension.Postgres/PostgresBulkProvider.cs` | Call helpers (#2/#3); take `UpsertRequest<T>` (#4) |
-| `ContextBulkExtension.SqlServer/SqlServerBulkProvider.cs` | Fail-loud hooks (#5); take `UpsertRequest<T>` (#4) |
-| `ContextBulkExtension.Tests/BulkProviderHelpersTests.cs` | Unit tests for #2 and #3 |
+
+| File                                                         | Responsibility                                                                      |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `ContextBulkExtension.Core/Abstractions/BulkProviderBase.cs` | Move open/begin inside try (#1); build/pass `UpsertRequest<T>` (#4)                 |
+| `ContextBulkExtension.Core/Abstractions/UpsertRequest.cs`    | **Create** — shared upsert/delete/sync request record (#4)                          |
+| `ContextBulkExtension.Core/Helpers/BulkProviderHelpers.cs`   | Add `EnsurePostgresIdentityOutputSupported` (#2) + `ToPostgresTargetQualified` (#3) |
+| `ContextBulkExtension.Core/BulkConfig.cs`                    | Expand `IdentityOutput` XML doc (#6)                                                |
+| `ContextBulkExtension.Core/DbContextBulkExtension.cs`        | Optional one-line XML note on `BulkInsertAsync` overload (#6)                       |
+| `ContextBulkExtension.Postgres/PostgresBulkProvider.cs`      | Call helpers (#2/#3); take `UpsertRequest<T>` (#4)                                  |
+| `ContextBulkExtension.SqlServer/SqlServerBulkProvider.cs`    | Fail-loud hooks (#5); take `UpsertRequest<T>` (#4)                                  |
+| `ContextBulkExtension.Tests/BulkProviderHelpersTests.cs`     | Unit tests for #2 and #3                                                            |
+
 
 ---
+
+
 
 ### Task 1: Connection leak window (Issue #1)
 
 **Files:**
+
 - Modify: `ContextBulkExtension.Core/Abstractions/BulkProviderBase.cs:166-274`
 - Test: regression — full suite (no isolated unit test; EF connection ref-count needs live provider)
 
 **Interfaces:**
+
 - Consumes: existing `OwnsTransactionWhenMissing`, `OpenConnectionAsync` / `BeginTransactionAsync` / `CloseConnectionAsync`
 - Produces: same public `BulkUpsertAsync` behavior; open+begin both covered by outer `finally`
 
@@ -92,6 +100,7 @@ Do **not** change the inner staging-drop `try/finally` or catch filters.
 - [ ] **Step 3: Verify by inspection**
 
 Checklist (all must be true):
+
 1. `BeginTransactionAsync` is inside the same `try` that has the close `finally`.
 2. If begin throws, `CloseConnectionAsync` still runs.
 3. Commit still only happens after successful upsert body.
@@ -122,13 +131,17 @@ EOF
 
 ---
 
+
+
 ### Task 2: SqlServer fail-loud hooks (Issue #5)
 
 **Files:**
+
 - Modify: `ContextBulkExtension.SqlServer/SqlServerBulkProvider.cs:219-241`
 - Test: regression suite (hooks unreachable when flags correct; throw is defensive)
 
 **Interfaces:**
+
 - Consumes: base guards `!BundlesDeleteInUpsert` / `!BundlesIdentityInUpsert` (`BulkProviderBase` ~213–238)
 - Produces: SqlServer overrides throw `NotSupportedException` instead of `Task.CompletedTask`
 
@@ -198,14 +211,18 @@ EOF
 
 ---
 
+
+
 ### Task 3: PostgreSQL IdentityOutput guard (Issue #2)
 
 **Files:**
+
 - Modify: `ContextBulkExtension.Core/Helpers/BulkProviderHelpers.cs`
 - Modify: `ContextBulkExtension.Postgres/PostgresBulkProvider.cs` (`BuildUpsertSql` identity branch ~246)
 - Test: `ContextBulkExtension.Tests/BulkProviderHelpersTests.cs`
 
 **Interfaces:**
+
 - Consumes: `ColumnMetadata.ClrType`, `IsIdentity` list from `EntityMetadataHelper.GetIdentityColumns`
 - Produces: `BulkProviderHelpers.EnsurePostgresIdentityOutputSupported(IReadOnlyList<ColumnMetadata> identityColumns)` — throws `NotSupportedException` unless exactly one `int`/`long` identity column
 
@@ -364,14 +381,18 @@ EOF
 
 ---
 
+
+
 ### Task 4: Bracket → quote rewrite for deleteScope (Issue #3)
 
 **Files:**
+
 - Modify: `ContextBulkExtension.Core/Helpers/BulkProviderHelpers.cs`
 - Modify: `ContextBulkExtension.Postgres/PostgresBulkProvider.cs:379-381`
 - Test: `ContextBulkExtension.Tests/BulkProviderHelpersTests.cs`
 
 **Interfaces:**
+
 - Consumes: SQL Server-shaped WHERE from `ExpressionHelper.BuildWhereClauseFromExpression` (`target.[Col]` / `target.[Col]]]` for `]` in name via `EscapeSqlIdentifier`)
 - Produces: `BulkProviderHelpers.ToPostgresTargetQualified(string sqlServerStyleWhere)` — correct `"…"` quoting including `]]` unescape
 
@@ -468,9 +489,12 @@ EOF
 
 ---
 
+
+
 ### Task 5: Bundle upsert hooks into `UpsertRequest<T>` (Issue #4)
 
 **Files:**
+
 - Create: `ContextBulkExtension.Core/Abstractions/UpsertRequest.cs`
 - Modify: `ContextBulkExtension.Core/Abstractions/BulkProviderBase.cs` (abstract hooks + call sites)
 - Modify: `ContextBulkExtension.Postgres/PostgresBulkProvider.cs` (three overrides)
@@ -478,6 +502,7 @@ EOF
 - Test: full regression suite (refactor only)
 
 **Interfaces:**
+
 - Consumes: all former ExecuteUpsert / ExecuteDeleteNotMatched / SyncIdentities parameters
 - Produces:
 
@@ -519,7 +544,7 @@ New abstract signatures on `BulkProviderBase`:
 
 (`ExecuteDeleteNotMatchedAsync` gains type param `T` so one request type covers all hooks.)
 
-- [ ] **Step 1: Add `UpsertRequest.cs`**
+- [ ] **Step 1: Add** `UpsertRequest.cs`
 
 Create the file with the record/class above. Add usings:
 
@@ -529,7 +554,7 @@ using ContextBulkExtension.Core.Helpers;
 using Microsoft.EntityFrameworkCore;
 ```
 
-- [ ] **Step 2: Update `BulkProviderBase` abstract methods + call site**
+- [ ] **Step 2: Update** `BulkProviderBase` **abstract methods + call site**
 
 Replace the three abstract method declarations with the short signatures above.
 
@@ -639,17 +664,21 @@ EOF
 
 ---
 
+
+
 ### Task 6: Document IdentityOutput performance cliff (Issue #6)
 
 **Files:**
+
 - Modify: `ContextBulkExtension.Core/BulkConfig.cs:50-58`
 - Modify: `ContextBulkExtension.Core/DbContextBulkExtension.cs:18-21` (XML on config overload)
 
 **Interfaces:**
+
 - Consumes: existing `IdentityOutput` + `BulkInsertAsync` reroute (`DbContextBulkExtension.cs:30-55`)
 - Produces: docs only — no runtime change
 
-- [ ] **Step 1: Expand `BulkConfig.IdentityOutput` XML**
+- [ ] **Step 1: Expand** `BulkConfig.IdentityOutput` **XML**
 
 Replace the property doc with:
 
@@ -668,7 +697,7 @@ Replace the property doc with:
     public bool IdentityOutput { get; set; } = false;
 ```
 
-- [ ] **Step 2: Note on `BulkInsertAsync` overload**
+- [ ] **Step 2: Note on** `BulkInsertAsync` **overload**
 
 Update the XML summary for the `BulkInsertAsync(…, BulkConfig, …)` overload:
 
@@ -704,21 +733,27 @@ EOF
 
 ---
 
+
+
 ## Self-Review Checklist
 
-| Spec item (review issue) | Task |
-|--------------------------|------|
-| #1 Connection leak before try | Task 1 |
-| #2 PG identity ROW_NUMBER assumption | Task 3 |
-| #3 Bracket replace / `]]` | Task 4 |
+
+| Spec item (review issue)               | Task   |
+| -------------------------------------- | ------ |
+| #1 Connection leak before try          | Task 1 |
+| #2 PG identity ROW_NUMBER assumption   | Task 3 |
+| #3 Bracket replace / `]]`              | Task 4 |
 | #4 Parameter explosion / UpsertRequest | Task 5 |
-| #5 SqlServer no-op hooks | Task 2 |
-| #6 IdentityOutput docs | Task 6 |
+| #5 SqlServer no-op hooks               | Task 2 |
+| #6 IdentityOutput docs                 | Task 6 |
+
 
 - No TBD/placeholder steps.
 - Task 5 signatures match Task 2 throws after refactor.
 - Paths use `Postgres` / `PostgresBulkProvider` (not stale `PostgreSql` names in the review doc).
 - Issue #2 text corrects review’s CACHE-gap overclaim: guard targets non-monotonic identity types only.
+
+
 
 ## Suggested fix order (matches review)
 
@@ -726,3 +761,4 @@ EOF
 2. Task 2 — fail-loud (cheap)
 3. Task 3 — identity guard
 4. Task 4 → 5 → 6 — correctness polish, refactor, docs
+
