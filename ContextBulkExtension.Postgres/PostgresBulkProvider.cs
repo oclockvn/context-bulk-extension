@@ -7,9 +7,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 
-namespace ContextBulkExtension.PostgreSql;
+namespace ContextBulkExtension.Postgres;
 
-internal sealed class PostgreSqlBulkProvider : BulkProviderBase
+internal sealed class PostgresBulkProvider : BulkProviderBase
 {
     public override bool Supports(DbConnection connection) => connection is NpgsqlConnection;
 

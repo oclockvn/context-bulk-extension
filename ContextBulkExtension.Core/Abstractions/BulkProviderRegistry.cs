@@ -37,7 +37,7 @@ internal static class BulkProviderRegistry
 
         throw new InvalidOperationException(
             $"No bulk provider registered for connection type '{connection.GetType().FullName}'. " +
-            "Reference ContextBulkExtension.SqlServer or ContextBulkExtension.PostgreSql. " +
+            "Reference ContextBulkExtension.SqlServer or ContextBulkExtension.Postgres. " +
             "Auto-discovery loads provider DLLs from AppContext.BaseDirectory; " +
             "trimmed/AOT/single-file apps must keep the provider assembly deployed beside the app.");
     }
@@ -59,8 +59,8 @@ internal static class BulkProviderRegistry
                 "Initialize");
 
             TryLoadAndRegister(
-                "ContextBulkExtension.PostgreSql",
-                "ContextBulkExtension.PostgreSql.PostgreSqlBulkProviderRegistration",
+                "ContextBulkExtension.Postgres",
+                "ContextBulkExtension.Postgres.PostgresBulkProviderRegistration",
                 "Initialize");
 
             Volatile.Write(ref _providersLoaded, 1);

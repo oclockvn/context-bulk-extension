@@ -93,6 +93,15 @@ await db.BulkUpsertWithDeleteScopeAsync(
 - `ContextBulkExtension.Postgres` — PostgreSQL provider (embeds Core)
 - `ContextBulkExtension.Core` — shared API + metadata (**internal project**, not published)
 
+## Publishing
+
+```powershell
+.\scripts\publish-nuget.ps1 -DryRun
+.\scripts\publish-nuget.ps1 -LocalPush   # needs NUGET_API_KEY
+```
+
+See [PUBLISH.md](PUBLISH.md) for versioning, CI tags, and other flags.
+
 ## Roadmap
 
 - ~~BulkMerge~~ cancelled, use BulkUpsert instead

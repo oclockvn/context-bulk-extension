@@ -29,8 +29,10 @@ This document explains the build architecture, versioning strategy, and CI/CD wo
 - Separate GitHub Actions jobs per .NET version
 
 **Packages Produced:**
-- `ContextBulkExtension` version **8.x.x** - For .NET 8 / EF Core 8.x
-- `ContextBulkExtension` version **10.x.x** - For .NET 10 / EF Core 10.x
+- `ContextBulkExtension.SqlServer` — `8.x` / `10.x` (embeds Core.dll)
+- `ContextBulkExtension.Postgres` — `8.x` / `10.x` (embeds Core.dll)
+
+`ContextBulkExtension.Core` is an internal project only (not published).
 
 ---
 
@@ -405,11 +407,13 @@ act workflow_dispatch \
 2. Commit changes
 3. Create and push a tag:
    ```bash
-   git tag -a v1.0.0 -m "Release version 1.0.0"
-   git push origin v1.0.0
+   git tag -a v8.0.20.0 -m "Release 8.0.20.0 / 10.0.20.0"
+   git push origin v8.0.20.0
    ```
 4. Workflow triggers automatically
-5. Packages published to NuGet.org
+5. SqlServer + Postgres packages published to NuGet.org (Core is embedded, not pushed)
+
+Or use `.\scripts\publish-nuget.ps1` / `-LocalPush` — see [PUBLISH.md](../PUBLISH.md).
 
 ### Version Numbering Examples
 

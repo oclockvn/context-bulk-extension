@@ -1,7 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\ContextBulkExtension.Core\ContextBulkExtension.Core.csproj" />
+    <ProjectReference Include="..\ContextBulkExtension.Core\ContextBulkExtension.Core.csproj">
+      <PrivateAssets>all</PrivateAssets>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>

@@ -8,13 +8,13 @@ ContextBulkExtension is a high-performance Entity Framework Core extension libra
 Supports **SQL Server** (`SqlBulkCopy` + `MERGE`) and **PostgreSQL** (binary `COPY` + staging upsert).
 
 **Target Frameworks:** .NET 8.0 / .NET 10.0  
-**Packages:** `ContextBulkExtension.Core`, `.SqlServer`, `.PostgreSql`
+**Packages:** `ContextBulkExtension.SqlServer`, `ContextBulkExtension.Postgres` (Core embedded, not published)
 
 ## Build Commands
 
 ```bash
 dotnet build ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.csproj
-dotnet build ContextBulkExtension.PostgreSql/ContextBulkExtension.PostgreSql.csproj
+dotnet build ContextBulkExtension.Postgres/ContextBulkExtension.Postgres.csproj
 dotnet test ContextBulkExtension.Tests/ContextBulkExtension.Tests.csproj -v q
 ```
 
@@ -23,8 +23,8 @@ Optional LocalDB for SQL Server tests without Docker:
 
 ## Architecture
 
-1. **Core** — public `BulkInsertAsync` / `BulkUpsert*` / `BulkConfig`; `BulkProviderRegistry`; metadata helpers
+1. **Core** — public `BulkInsertAsync` / `BulkUpsert*` / `BulkConfig`; `BulkProviderRegistry`; metadata helpers (internal project; DLL packed into providers)
 2. **SqlServer** — `SqlServerBulkProvider` (SqlBulkCopy + MERGE)
-3. **PostgreSql** — `PostgreSqlBulkProvider` (COPY + UPDATE/INSERT staging)
+3. **Postgres** — `PostgresBulkProvider` (COPY + UPDATE/INSERT staging)
 
 Provider assemblies auto-register when loaded from app base directory.

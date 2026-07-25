@@ -13,9 +13,9 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ContextBulkExtension.SqlSer
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension.SqlServer.Net8", "ContextBulkExtension.SqlServer\ContextBulkExtension.SqlServer.Net8.csproj", "{CA1AD0D0-3335-4DF7-8C59-128A0214AFD7}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ContextBulkExtension.PostgreSql", "ContextBulkExtension.PostgreSql", "{1824C33F-4E81-A525-853A-3EC174A1CB5D}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ContextBulkExtension.Postgres", "ContextBulkExtension.Postgres", "{1824C33F-4E81-A525-853A-3EC174A1CB5D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension.PostgreSql.Net8", "ContextBulkExtension.PostgreSql\ContextBulkExtension.PostgreSql.Net8.csproj", "{2E13E1B4-E37D-4B87-A927-FC7540DD11EB}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension.Postgres.Net8", "ContextBulkExtension.Postgres\ContextBulkExtension.Postgres.Net8.csproj", "{2E13E1B4-E37D-4B87-A927-FC7540DD11EB}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

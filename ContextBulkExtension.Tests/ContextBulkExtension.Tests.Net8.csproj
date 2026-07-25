@@ -25,8 +25,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\ContextBulkExtension.Core\ContextBulkExtension.Core.Net8.csproj" />
     <ProjectReference Include="..\ContextBulkExtension.SqlServer\ContextBulkExtension.SqlServer.Net8.csproj" />
-    <ProjectReference Include="..\ContextBulkExtension.PostgreSql\ContextBulkExtension.PostgreSql.Net8.csproj" />
+    <ProjectReference Include="..\ContextBulkExtension.Postgres\ContextBulkExtension.Postgres.Net8.csproj" />
   </ItemGroup>
 
 </Project>

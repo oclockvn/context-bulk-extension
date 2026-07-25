@@ -82,9 +82,8 @@ jobs:
         run: |
           PATCH=${{ steps.version.outputs.PatchNumber }}
           for proj in \
-            ContextBulkExtension.Core/ContextBulkExtension.Core.Net8.csproj \
             ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.Net8.csproj \
-            ContextBulkExtension.PostgreSql/ContextBulkExtension.PostgreSql.Net8.csproj
+            ContextBulkExtension.Postgres/ContextBulkExtension.Postgres.Net8.csproj
           do
             dotnet build "$proj" --configuration Release --no-incremental -p:PatchNumber=$PATCH
             dotnet pack "$proj" --configuration Release --no-build --output ./artifacts -p:PatchNumber=$PATCH
@@ -110,7 +109,7 @@ jobs:
             echo "## Published .NET 8 NuGet Packages"
             echo ""
             echo "**Version:** \`${PACKAGE_VERSION}\`"
-            echo "**Packages:** Core, SqlServer, PostgreSql"
+            echo "**Packages:** SqlServer, Postgres"
             echo "**Target:** .NET 8 / EF Core 8.x"
             echo "**Published:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           } >> $GITHUB_STEP_SUMMARY
@@ -183,9 +182,8 @@ jobs:
         run: |
           PATCH=${{ steps.version.outputs.PatchNumber }}
           for proj in \
-            ContextBulkExtension.Core/ContextBulkExtension.Core.csproj \
             ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer.csproj \
-            ContextBulkExtension.PostgreSql/ContextBulkExtension.PostgreSql.csproj
+            ContextBulkExtension.Postgres/ContextBulkExtension.Postgres.csproj
           do
             dotnet build "$proj" --configuration Release --no-incremental -p:PatchNumber=$PATCH
             dotnet pack "$proj" --configuration Release --no-build --output ./artifacts -p:PatchNumber=$PATCH
@@ -211,7 +209,7 @@ jobs:
             echo "## Published .NET 10 NuGet Packages"
             echo ""
             echo "**Version:** \`${PACKAGE_VERSION}\`"
-            echo "**Packages:** Core, SqlServer, PostgreSql"
+            echo "**Packages:** SqlServer, Postgres"
             echo "**Target:** .NET 10 / EF Core 10.x"
             echo "**Published:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           } >> $GITHUB_STEP_SUMMARY

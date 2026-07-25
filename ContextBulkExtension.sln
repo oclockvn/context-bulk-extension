@@ -9,7 +9,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension.Core",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension.SqlServer", "ContextBulkExtension.SqlServer\ContextBulkExtension.SqlServer.csproj", "{13E1EC2C-A55D-45BA-BFA2-3138B05C06EC}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension.PostgreSql", "ContextBulkExtension.PostgreSql\ContextBulkExtension.PostgreSql.csproj", "{FDB7783D-FD99-46F5-9676-32021B724130}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContextBulkExtension.Postgres", "ContextBulkExtension.Postgres\ContextBulkExtension.Postgres.csproj", "{FDB7783D-FD99-46F5-9676-32021B724130}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
