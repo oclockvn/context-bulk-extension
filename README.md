@@ -93,6 +93,10 @@ await db.BulkUpsertWithDeleteScopeAsync(
 - `ContextBulkExtension.Postgres` — PostgreSQL provider (embeds Core)
 - `ContextBulkExtension.Core` — shared API + metadata (**internal project**, not published)
 
+There is no package named `ContextBulkExtension`. For contributor and AI-agent guidance
+(build, test, versioning, architecture) see [AGENTS.md](AGENTS.md) and
+[docs/architecture.md](docs/architecture.md).
+
 ## Publishing
 
 ```powershell
