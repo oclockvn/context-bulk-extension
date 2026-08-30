@@ -1,0 +1,34 @@
+#nullable enable
+ContextBulkExtension.Core.BulkConfig
+ContextBulkExtension.Core.BulkConfig.BatchSize.get -> int
+ContextBulkExtension.Core.BulkConfig.BatchSize.set -> void
+ContextBulkExtension.Core.BulkConfig.BulkConfig() -> void
+ContextBulkExtension.Core.BulkConfig.BulkConfig(ContextBulkExtension.Core.BulkConfig! original) -> void
+ContextBulkExtension.Core.BulkConfig.CheckConstraints.get -> bool
+ContextBulkExtension.Core.BulkConfig.CheckConstraints.set -> void
+ContextBulkExtension.Core.BulkConfig.EnableStreaming.get -> bool
+ContextBulkExtension.Core.BulkConfig.EnableStreaming.set -> void
+ContextBulkExtension.Core.BulkConfig.FireTriggers.get -> bool
+ContextBulkExtension.Core.BulkConfig.FireTriggers.set -> void
+ContextBulkExtension.Core.BulkConfig.IdentityOutput.get -> bool
+ContextBulkExtension.Core.BulkConfig.IdentityOutput.set -> void
+ContextBulkExtension.Core.BulkConfig.InsertOnly.get -> bool
+ContextBulkExtension.Core.BulkConfig.InsertOnly.set -> void
+ContextBulkExtension.Core.BulkConfig.TimeoutSeconds.get -> int
+ContextBulkExtension.Core.BulkConfig.TimeoutSeconds.set -> void
+ContextBulkExtension.Core.BulkConfig.UseTableLock.get -> bool
+ContextBulkExtension.Core.BulkConfig.UseTableLock.set -> void
+ContextBulkExtension.Core.DbContextBulkExtension
+override ContextBulkExtension.Core.BulkConfig.Equals(object? obj) -> bool
+override ContextBulkExtension.Core.BulkConfig.GetHashCode() -> int
+override ContextBulkExtension.Core.BulkConfig.ToString() -> string!
+static ContextBulkExtension.Core.BulkConfig.operator !=(ContextBulkExtension.Core.BulkConfig? left, ContextBulkExtension.Core.BulkConfig? right) -> bool
+static ContextBulkExtension.Core.BulkConfig.operator ==(ContextBulkExtension.Core.BulkConfig? left, ContextBulkExtension.Core.BulkConfig? right) -> bool
+static ContextBulkExtension.Core.DbContextBulkExtension.BulkInsertAsync<T>(this Microsoft.EntityFrameworkCore.DbContext! context, System.Collections.Generic.IList<T!>! entities, ContextBulkExtension.Core.BulkConfig! config, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+static ContextBulkExtension.Core.DbContextBulkExtension.BulkInsertAsync<T>(this Microsoft.EntityFrameworkCore.DbContext! context, System.Collections.Generic.IList<T!>! entities, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+static ContextBulkExtension.Core.DbContextBulkExtension.BulkUpsertAsync<T>(this Microsoft.EntityFrameworkCore.DbContext! context, System.Collections.Generic.IList<T!>! entities, System.Linq.Expressions.Expression<System.Func<T!, object!>!>? matchOn = null, System.Linq.Expressions.Expression<System.Func<T!, object!>!>? updateColumns = null, ContextBulkExtension.Core.BulkConfig? config = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+static ContextBulkExtension.Core.DbContextBulkExtension.BulkUpsertWithDeleteScopeAsync<T>(this Microsoft.EntityFrameworkCore.DbContext! context, System.Collections.Generic.IList<T!>! entities, System.Linq.Expressions.Expression<System.Func<T!, object!>!>? matchOn = null, System.Linq.Expressions.Expression<System.Func<T!, object!>!>? updateColumns = null, System.Linq.Expressions.Expression<System.Func<T!, bool>!>? deleteScope = null, ContextBulkExtension.Core.BulkConfig? config = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+virtual ContextBulkExtension.Core.BulkConfig.<Clone>$() -> ContextBulkExtension.Core.BulkConfig!
+virtual ContextBulkExtension.Core.BulkConfig.EqualityContract.get -> System.Type!
+virtual ContextBulkExtension.Core.BulkConfig.Equals(ContextBulkExtension.Core.BulkConfig? other) -> bool
+virtual ContextBulkExtension.Core.BulkConfig.PrintMembers(System.Text.StringBuilder! builder) -> bool

@@ -32,7 +32,21 @@ CI.
 
 ## Public API
 
-Only `ContextBulkExtension.Core` (the `ContextBulkExtension.Core` namespace plus the
-`DbContext` extension methods) is a supported surface. Provider internals are `internal`.
-Some `Helpers/*` members are `public` for cross-assembly use by providers — treat them as
-semi-internal; changing them still warrants a deliberate review.
+The entire supported surface is two types in `ContextBulkExtension.Core`:
+`DbContextBulkExtension` (the `BulkInsertAsync` / `BulkUpsertAsync` /
+`BulkUpsertWithDeleteScopeAsync` extension methods) and `BulkConfig`. Everything else —
+providers, metadata helpers, the `BulkProviderBase` template — is `internal` (providers see
+Core internals via `InternalsVisibleTo`).
+
+That surface is locked by `Microsoft.CodeAnalysis.PublicApiAnalyzers`:
+
+- `ContextBulkExtension.Core/PublicAPI.Shipped.txt` — API already released in packages on
+  nuget.org. Do not edit except to move entries up from Unshipped at release time.
+- `ContextBulkExtension.Core/PublicAPI.Unshipped.txt` — API added since the last release.
+
+`RS0016` (new public symbol not listed) and `RS0017` (listed symbol removed) are **build
+errors** for Core (see `.editorconfig`). If you intentionally change the public API:
+
+1. Build once; the analyzer's message names the exact line to add.
+2. Add it to `PublicAPI.Unshipped.txt` (there is an IDE code-fix for this).
+3. Call out the API change in your PR description.

@@ -115,10 +115,11 @@ See [PUBLISH.md](PUBLISH.md).
 - File-scoped namespaces, `var`, nullable enable, expression-bodied members where they read
   cleanly. Match the surrounding file. `.editorconfig` encodes this (most rules are
   `suggestion`, so it will not fail the build).
-- Provider-internal types are `internal`; only `ContextBulkExtension.Core` (namespace
-  `ContextBulkExtension.Core`, plus the `DbContext` extension) is public API. Some
-  `Helpers/*` members are `public` for cross-assembly use by the providers — treat them as
-  semi-internal, not a supported surface.
+- The **only** public API is `DbContextBulkExtension` (the extension methods) and
+  `BulkConfig`, both in `ContextBulkExtension.Core`. Everything else is `internal`. The
+  surface is locked by `PublicAPI.{Shipped,Unshipped}.txt` + analyzer; `RS0016` / `RS0017`
+  are build errors for Core. Changing the public API means updating
+  `PublicAPI.Unshipped.txt` — see [CONTRIBUTING.md](CONTRIBUTING.md#public-api).
 - Inline comments prefixed `// ponytail:` are deliberate design notes explaining a
   non-obvious choice. Keep the style if you add one.
 - XML doc comments on public members ship in the package (`GenerateDocumentationFile=true`,

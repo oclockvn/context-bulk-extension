@@ -102,3 +102,10 @@ dotnet_style_namespace_match_folder = true:silent
 dotnet_diagnostic.CA1062.severity = none   # null checks on public args — done explicitly where it matters
 dotnet_diagnostic.CA2007.severity = none   # ConfigureAwait — library targets apps, not required here
 dotnet_diagnostic.IDE0005.severity = warning # unnecessary usings
+
+[ContextBulkExtension.Core/**.cs]
+# Public API surface is locked by Microsoft.CodeAnalysis.PublicApiAnalyzers.
+# Any add/remove must be reflected in PublicAPI.Unshipped.txt (see CONTRIBUTING.md).
+dotnet_diagnostic.RS0016.severity = error  # public symbol missing from PublicAPI.*.txt
+dotnet_diagnostic.RS0017.severity = error  # symbol in PublicAPI.*.txt no longer exists
+dotnet_diagnostic.RS0037.severity = none   # nullability annotations in API files (already declared via #nullable enable)

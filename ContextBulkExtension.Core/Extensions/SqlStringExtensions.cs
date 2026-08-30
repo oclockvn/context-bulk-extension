@@ -1,6 +1,6 @@
 namespace ContextBulkExtension.Core.Extensions;
 
-public static class SqlStringExtensions
+internal static class SqlStringExtensions
 {
     /// <summary>
     /// Escapes SQL Server identifiers by replacing ] with ]] and wrapping in brackets.
