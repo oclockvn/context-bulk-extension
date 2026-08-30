@@ -8,7 +8,7 @@ namespace ContextBulkExtension.Core.Helpers;
 /// <summary>
 /// Helper class for working with LINQ expressions in bulk operations.
 /// </summary>
-public static class ExpressionHelper
+internal static class ExpressionHelper
 {
     /// <summary>
     /// Extracts property names from a MatchOn expression.
