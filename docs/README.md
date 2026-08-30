@@ -6,6 +6,7 @@
 |-----|---------|
 | [architecture.md](architecture.md) | Request flow, `BulkProviderBase` hook table, provider auto-discovery, gotchas, how to add a new provider |
 | [../AGENTS.md](../AGENTS.md) | Build / test / versioning / conventions for contributors and AI agents |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor workflow; pointers into the above |
 | [../PUBLISH.md](../PUBLISH.md) | Authoritative release + versioning procedure |
 | [../README.md](../README.md) | User-facing: install, usage examples, package matrix |
 | [../samples/README.md](../samples/README.md) | Runnable `QuickStart` — all four entry points against a real DB |

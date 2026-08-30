@@ -3,6 +3,15 @@ namespace ContextBulkExtension.Core;
 /// <summary>
 /// Configuration options for bulk operations.
 /// </summary>
+/// <remarks>
+/// Cross-provider options: <see cref="BatchSize"/>, <see cref="TimeoutSeconds"/>,
+/// <see cref="InsertOnly"/>, <see cref="IdentityOutput"/>.
+/// <para>
+/// SQL Server only (map to <c>SqlBulkCopyOptions</c> / <c>SqlBulkCopy</c>; the PostgreSQL
+/// provider ignores them silently): <see cref="CheckConstraints"/>, <see cref="FireTriggers"/>,
+/// <see cref="EnableStreaming"/>, <see cref="UseTableLock"/>.
+/// </para>
+/// </remarks>
 public record BulkConfig
 {
     /// <summary>

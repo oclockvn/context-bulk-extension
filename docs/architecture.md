@@ -111,6 +111,7 @@ executable or `Resolve` throws.
 - Entities are matched back to identity output by a **row-index column** injected into the
   staging table, not by position in the input list.
 
+<a id="adding-a-new-provider-eg-mysql-sqlite"></a>
 ## Adding a new provider (e.g. MySQL, SQLite)
 
 1. `ContextBulkExtension.MySql/ContextBulkExtension.MySql.csproj` + `.Net8.csproj` twin
