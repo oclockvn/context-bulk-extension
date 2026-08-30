@@ -64,6 +64,18 @@ dotnet build ContextBulkExtension.Postgres/ContextBulkExtension.Postgres.Net8.cs
 dotnet test ContextBulkExtension.Tests/ContextBulkExtension.Tests.csproj -v q
 ```
 
+`.github/workflows/ci.yml` runs the provider builds (net8 + net10) and the test suite
+(split into SqlServer and Postgres jobs) on every PR to `master`.
+
+For a fast end-to-end smoke check without xUnit, run the sample (Docker required):
+
+```bash
+dotnet run --project samples/QuickStart
+```
+
+Exit code 0 means every public entry point worked against a real PostgreSQL database.
+See [samples/README.md](samples/README.md).
+
 Tests need a real database. By default the fixtures
 (`ContextBulkExtension.Tests/Fixtures/`) spin up **Testcontainers** images
 (`mcr.microsoft.com/mssql/server:2022-latest`, `postgres:16-alpine`), so a **running Docker
@@ -101,7 +113,8 @@ See [PUBLISH.md](PUBLISH.md).
 ## Conventions
 
 - File-scoped namespaces, `var`, nullable enable, expression-bodied members where they read
-  cleanly. Match the surrounding file.
+  cleanly. Match the surrounding file. `.editorconfig` encodes this (most rules are
+  `suggestion`, so it will not fail the build).
 - Provider-internal types are `internal`; only `ContextBulkExtension.Core` (namespace
   `ContextBulkExtension.Core`, plus the `DbContext` extension) is public API. Some
   `Helpers/*` members are `public` for cross-assembly use by the providers — treat them as

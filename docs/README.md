@@ -8,6 +8,7 @@
 | [../AGENTS.md](../AGENTS.md) | Build / test / versioning / conventions for contributors and AI agents |
 | [../PUBLISH.md](../PUBLISH.md) | Authoritative release + versioning procedure |
 | [../README.md](../README.md) | User-facing: install, usage examples, package matrix |
+| [../samples/README.md](../samples/README.md) | Runnable `QuickStart` — all four entry points against a real DB |
 
 ## archive/
 

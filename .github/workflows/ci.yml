@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.tfm }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tfm: net8
+            sdk: '8.0.x'
+            suffix: '.Net8'
+          - tfm: net10
+            sdk: '10.0.x'
+            suffix: ''
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ matrix.sdk }}
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ matrix.tfm }}-${{ hashFiles('**/*.csproj', '**/*.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-${{ matrix.tfm }}-
+            ${{ runner.os }}-nuget-
+
+      - name: Build providers
+        run: |
+          for proj in \
+            ContextBulkExtension.SqlServer/ContextBulkExtension.SqlServer${{ matrix.suffix }}.csproj \
+            ContextBulkExtension.Postgres/ContextBulkExtension.Postgres${{ matrix.suffix }}.csproj
+          do
+            dotnet build "$proj" --configuration Release
+          done
+
+  test:
+    name: Test (net10, ${{ matrix.provider }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: SqlServer
+            filter: 'FullyQualifiedName!~Postgres'
+          - provider: Postgres
+            filter: 'FullyQualifiedName~Postgres'
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-test-${{ hashFiles('**/*.csproj', '**/*.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-test-
+            ${{ runner.os }}-nuget-
+
+      # Testcontainers uses the Docker daemon preinstalled on ubuntu-latest runners.
+      - name: Test
+        run: >
+          dotnet test ContextBulkExtension.Tests/ContextBulkExtension.Tests.csproj
+          --configuration Release
+          --filter "${{ matrix.filter }}"
+          --logger "console;verbosity=normal"
+          --logger "trx;LogFileName=${{ matrix.provider }}.trx"
+          --results-directory ./test-results
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.provider }}
+          path: ./test-results
+          if-no-files-found: ignore
