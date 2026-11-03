@@ -432,6 +432,12 @@ internal sealed class PostgresBulkProvider : BulkProviderBase
             case DateTimeOffset dto:
                 await writer.WriteAsync(dto, cancellationToken);
                 break;
+            case DateOnly d:
+                await writer.WriteAsync(d, NpgsqlTypes.NpgsqlDbType.Date, cancellationToken);
+                break;
+            case TimeOnly t:
+                await writer.WriteAsync(t, NpgsqlTypes.NpgsqlDbType.Time, cancellationToken);
+                break;
             case decimal dec:
                 await writer.WriteAsync(dec, cancellationToken);
                 break;

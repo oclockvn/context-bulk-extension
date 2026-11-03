@@ -17,6 +17,7 @@ public class PostgresTestDbContext : DbContext
     public DbSet<EntityWithComputedColumn> EntitiesWithComputedColumn { get; set; }
     public DbSet<UserEntity> UserEntities { get; set; }
     public DbSet<MetricEntity> MetricEntities { get; set; }
+    public DbSet<DateOnlyEntity> DateOnlyEntities { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -86,6 +87,14 @@ public class PostgresTestDbContext : DbContext
             entity.Property(e => e.Date).IsRequired();
             entity.Property(e => e.Value).HasPrecision(18, 4).IsRequired();
             entity.Property(e => e.Category).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<DateOnlyEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
+            entity.HasIndex(e => e.Code).IsUnique();
         });
     }
 }
